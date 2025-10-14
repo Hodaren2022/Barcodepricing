@@ -1,0 +1,10 @@
+# netlify.toml
+
+# 這個設定告訴 Netlify 我們的 Serverless Functions 存放在哪個目錄
+[functions]
+  directory = "netlify/functions/"
+
+# 這個設定告訴 Netlify 在建置專案時要執行的指令以及要發布的目錄
+[build]
+  command = "npm run build"
+  publish = "build"

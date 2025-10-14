@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { PaintBucket, DollarSign, Barcode, ClipboardCheck, Search, X, Camera, Zap, FileText } from 'lucide-react';
+// 已移除所有 Firebase 相關的 import
+
+import { Upload, Camera, QrCode, RotateCcw, PaintBucket, DollarSign, Barcode, ClipboardCheck, Search, X } from 'lucide-react';
 
 // -----------------------------------------------------------------------------
 // 1. 核心設定與工具函數 (Core Setup & Utilities)
@@ -23,68 +25,74 @@ function djb2Hash(str) {
     return hash >>> 0;
 }
 
-/**
- * 指數退避 (Exponential Backoff) 執行 API 呼叫
- */
-async function callGeminiApiWithRetry(payload, apiUrl, maxRetries = 3) {
-    let lastError = null;
-    for (let i = 0; i < maxRetries; i++) {
-        try {
-            const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) {
-                const errorBody = await response.json();
-                throw new Error(`API response error: ${response.status} - ${errorBody.error?.message || 'Unknown error'}`);
-            }
-
-            const result = await response.json();
-            const candidate = result.candidates?.[0];
-
-            if (candidate && candidate.content?.parts?.[0]?.text) {
-                const jsonText = candidate.content.parts[0].text;
-                try {
-                    // 解析 JSON 內容
-                    return JSON.parse(jsonText);
-                } catch (parseError) {
-                    console.error("JSON Parse Error:", jsonText, parseError);
-                    throw new Error("AI 輸出格式錯誤，無法解析 JSON。");
-                }
-            } else {
-                throw new Error("AI 無法生成有效內容。");
-            }
-
-        } catch (error) {
-            lastError = error;
-            console.warn(`API call failed (Attempt ${i + 1}/${maxRetries}):`, error.message);
-            if (i < maxRetries - 1) {
-                const delay = Math.pow(2, i) * 1000; // 1s, 2s, 4s
-                await new Promise(resolve => setTimeout(resolve, delay));
-            }
-        }
-    }
-    throw lastError; // 所有重試失敗後拋出最後一個錯誤
-}
-
-
 // -----------------------------------------------------------------------------
-// 2. 主題配置與本地儲存設定 (Theming & Local Setup)
+// 2. 主題配置 (Theming Configuration)
 // -----------------------------------------------------------------------------
 
+// 定義所有可選主題及其 Tailwind 顏色類別
 const THEMES = {
-    'Default (Indigo)': { primary: 'bg-indigo-600', light: 'bg-indigo-100', hover: 'hover:bg-indigo-700', border: 'border-indigo-600', text: 'text-indigo-600', color: 'indigo' },
-    '海洋藍 (Ocean Blue)': { primary: 'bg-blue-600', light: 'bg-blue-100', hover: 'hover:bg-blue-700', border: 'border-blue-600', text: 'text-blue-600', color: 'blue' },
-    '森林綠 (Forest Green)': { primary: 'bg-green-600', light: 'bg-green-100', hover: 'hover:bg-green-700', border: 'border-green-600', text: 'text-green-600', color: 'green' },
-    '夕陽紅 (Sunset Red)': { primary: 'bg-red-600', light: 'bg-red-100', hover: 'hover:bg-red-700', border: 'border-red-600', text: 'text-red-600', color: 'red' },
-    '活力橙 (Vibrant Orange)': { primary: 'bg-orange-600', light: 'bg-orange-100', hover: 'hover:bg-orange-700', border: 'border-orange-600', text: 'text-orange-600', color: 'orange' },
-    '薰衣草紫 (Lavender)': { primary: 'bg-purple-600', light: 'bg-purple-100', hover: 'hover:bg-purple-700', border: 'border-purple-600', text: 'text-purple-600', color: 'purple' },
+    'Default (Indigo)': { 
+        primary: 'bg-indigo-600', 
+        light: 'bg-indigo-100', 
+        hover: 'hover:bg-indigo-700', 
+        border: 'border-indigo-600',
+        text: 'text-indigo-600',
+        color: 'indigo'
+    },
+    '海洋藍 (Ocean Blue)': { 
+        primary: 'bg-blue-600', 
+        light: 'bg-blue-100', 
+        hover: 'hover:bg-blue-700', 
+        border: 'border-blue-600',
+        text: 'text-blue-600',
+        color: 'blue'
+    },
+    '森林綠 (Forest Green)': { 
+        primary: 'bg-green-600', 
+        light: 'bg-green-100', 
+        hover: 'hover:bg-green-700', 
+        border: 'border-green-600',
+        text: 'text-green-600',
+        color: 'green'
+    },
+    '夕陽紅 (Sunset Red)': { 
+        primary: 'bg-red-600', 
+        light: 'bg-red-100', 
+        hover: 'hover:bg-red-700', 
+        border: 'border-red-600',
+        text: 'text-red-600',
+        color: 'red'
+    },
+    '活力橙 (Vibrant Orange)': { 
+        primary: 'bg-orange-600', 
+        light: 'bg-orange-100', 
+        hover: 'hover:bg-orange-700', 
+        border: 'border-orange-600',
+        text: 'text-orange-600',
+        color: 'orange'
+    },
+    '薰衣草紫 (Lavender)': { 
+        primary: 'bg-purple-600', 
+        light: 'bg-purple-100', 
+        hover: 'hover:bg-purple-700', 
+        border: 'border-purple-600',
+        text: 'text-purple-600',
+        color: 'purple'
+    },
 };
+
 const DEFAULT_THEME_KEY = 'Default (Indigo)';
 
+// -----------------------------------------------------------------------------
+// 3. 自定義 Hook - 本地儲存設定 (useLocalMVPSetup)
+// -----------------------------------------------------------------------------
+
+/**
+ * 處理 MVP 階段的本地儲存、主題和使用者 ID 管理。
+ * @returns {object} 包含 userId, isAuthReady, currentTheme, saveUserTheme 等狀態和物件。
+ */
 function useLocalMVPSetup() {
+    // 獲取或生成持久化的用戶 ID
     const [userId] = useState(() => {
         let savedId = localStorage.getItem('mvp_user_id');
         if (!savedId) {
@@ -94,24 +102,38 @@ function useLocalMVPSetup() {
         return savedId;
     });
 
+    // 載入本地儲存的主題
     const [currentTheme, setCurrentTheme] = useState(() => {
         const savedKey = localStorage.getItem('appTheme') || DEFAULT_THEME_KEY;
         return THEMES[savedKey] || THEMES[DEFAULT_THEME_KEY];
     });
 
+    // 儲存用戶主題到本地儲存
     const saveUserTheme = useCallback((themeKey) => {
         localStorage.setItem('appTheme', themeKey);
         setCurrentTheme(THEMES[themeKey] || THEMES[DEFAULT_THEME_KEY]);
     }, []);
 
+    // 在本地 MVP 模式下，應用程式始終是準備就緒的
     const isAuthReady = true; 
     
-    return { userId, isAuthReady, currentTheme, saveUserTheme, appId: MVP_APP_ID };
+    return { 
+        userId, 
+        isAuthReady, 
+        currentTheme, 
+        saveUserTheme,
+        appId: MVP_APP_ID // 傳回硬編碼的 App ID
+    };
 }
 
-// 主題選擇元件 (Theme Selector Component)
+// -----------------------------------------------------------------------------
+// 4. 主題選擇元件 (Theme Selector Component)
+// -----------------------------------------------------------------------------
+
+/**
+ * 顯示主題選擇面板的 Modal 元件。
+ */
 function ThemeSelector({ theme, saveTheme, onClose }) {
-    // 渲染邏輯與之前相同，略
     const handleThemeChange = (themeKey) => {
         saveTheme(themeKey);
     };
@@ -170,133 +192,71 @@ function ThemeSelector({ theme, saveTheme, onClose }) {
 }
 
 // -----------------------------------------------------------------------------
-// 3. AI 視覺擷取與分析元件 (AIOcrCaptureModal)
+// 5. 條碼掃描元件 (Barcode Scanner Modal Component)
 // -----------------------------------------------------------------------------
 
 /**
- * 負責攝影機存取、擷取畫面並呼叫 AI 進行分析的 Modal 元件。
- * 輸出為結構化 JSON 數據。
+ * 條碼掃描 Modal 元件 (QuaggaJS 模擬)
+ * 負責處理相機存取、視訊顯示，並將掃描結果傳回父元件。
  */
-function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
+function BarcodeScannerModal({ theme, onScanSuccess, onClose }) {
     const videoRef = useRef(null);
     const streamRef = useRef(null);
-    const [isCapturing, setIsCapturing] = useState(false);
+    const [isScanning, setIsScanning] = useState(false);
     const [scanError, setScanError] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
 
-    // 取得攝影機畫面
-    const startCamera = useCallback(async () => {
+    // 開始掃描 (初始化攝影機)
+    const startScanner = useCallback(async () => {
         setScanError('');
         try {
+            // 嘗試取得後置攝影機 ('environment')
             const stream = await navigator.mediaDevices.getUserMedia({ 
                 video: { 
-                    facingMode: "environment", // 使用後置鏡頭
+                    facingMode: "environment", 
                     width: { ideal: 640 },
                     height: { ideal: 480 }
                 } 
             });
             streamRef.current = stream;
             
+            // 將視訊流設定給 <video> 元素
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
                 await videoRef.current.play();
-                setIsCapturing(true);
+                setIsScanning(true);
             }
             
         } catch (err) {
             console.error("無法存取攝影機:", err);
             setScanError(`無法存取攝影機或權限被拒絕。請檢查瀏覽器設定。 (${err.name} - ${err.message})`);
-            setIsCapturing(false);
+            setIsScanning(false);
         }
     }, []);
 
-    // 釋放攝影機資源
-    const stopCamera = useCallback(() => {
+    // 停止掃描 (釋放攝影機資源)
+    const stopScanner = useCallback(() => {
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => track.stop());
             streamRef.current = null;
         }
-        setIsCapturing(false);
+        setIsScanning(false);
     }, []);
 
     // 處理 Modal 開啟/關閉時的生命週期
     useEffect(() => {
-        startCamera();
+        startScanner();
+        // 清理函數：當元件卸載時停止攝影機
         return () => {
-            stopCamera();
+            stopScanner();
         };
-    }, [startCamera, stopCamera]);
+    }, [startScanner, stopScanner]);
 
-
-    // 擷取視訊畫面並轉換為 Base64 (JPG) 數據
-    const captureImage = useCallback(() => {
-        if (!videoRef.current) return null;
-
-        const video = videoRef.current;
-        const canvas = document.createElement('canvas');
-        // 確保 canvas 尺寸與視訊畫面的解析度一致
-        canvas.width = video.videoWidth; 
-        canvas.height = video.videoHeight;
-
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        // 將 canvas 內容轉換為 Base64 格式的 JPEG 圖片 (0.8 品質)
-        const base64Data = canvas.toDataURL('image/jpeg', 0.8);
-        
-        // 移除 MIME 類型前綴，只留下純 Base64 數據
-        return base64Data.split(',')[1];
-    }, []);
-    
-    // 呼叫 Gemini API 進行視覺分析
-    const handleCaptureAndAnalyze = useCallback(async () => {
-        setIsLoading(true);
-        setScanError('');
-        
-        try {
-            const base64Image = captureImage();
-            if (!base64Image) {
-                throw new Error("無法從攝影機擷取到影像。");
-            }
-
-            const systemPrompt = "你是一位專業的價目標籤和收據分析師。請從提供的影像中提取產品條碼（如果可見）、主要售價、商店名稱以及任何詳細的折扣或促銷資訊。請嚴格以 JSON 格式輸出。";
-            const userPrompt = "分析此產品或價目標籤的影像，並提取所需的結構化資訊。請在 discountDetails 中提供所有相關的促銷訊息，例如買一送一、有效期限等。";
-            // API URL 指向我們的 Netlify Function
-            const apiUrl = `/.netlify/functions/gemini-proxy`;
-
-            // 準備傳遞給後端 Function 的資料
-            const payload = {
-                systemPrompt,
-                userPrompt,
-                base64Image
-            };
-            
-            // 呼叫後端 Function 並獲取結構化 JSON 結果
-            const analysisResult = await callGeminiApiWithRetry(payload, apiUrl);
-            
-            // 傳回分析結果
-            onAnalysisSuccess(analysisResult);
-            stopCamera();
-            onClose();
-
-        } catch (error) {
-            console.error("AI 分析失敗:", error);
-            setScanError(`AI 分析錯誤: ${error.message}`);
-        } finally {
-            setIsLoading(false);
-        }
-    }, [captureImage, onAnalysisSuccess, onClose, stopCamera]);
-    
-    // 模擬 AI 分析成功 (用於測試或無網路環境)
-    const handleSimulatedAnalysis = () => {
-        stopCamera();
-        const mockResult = {
-            scannedBarcode: '4710123456789',
-            extractedPrice: (Math.random() * 50 + 100).toFixed(0).toString(),
-            storeName: '模擬超商 (AI)',
-            discountDetails: '買二送一優惠 / 限時促銷',
-        };
-        onAnalysisSuccess(mockResult);
+    // 模擬實際的條碼檢測成功
+    const handleSimulatedScan = () => {
+        stopScanner();
+        // 模擬一個常見的 EAN-13 條碼：統一碼 471 開頭
+        const mockBarcode = '4710123456789'; 
+        onScanSuccess(mockBarcode);
         onClose();
     };
 
@@ -308,73 +268,51 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 transform transition-all flex flex-col items-center">
                 <header className="flex justify-between items-center w-full mb-4 border-b pb-2">
                     <h3 className={`text-xl font-bold ${theme.text} flex items-center`}>
-                        <Zap className="inline-block w-5 h-5 mr-2" />
-                        AI 視覺擷取與分析
+                        <QrCode className="inline-block w-5 h-5 mr-2" />
+                        條碼掃描器 (測試版)
                     </h3>
-                    <button onClick={() => { stopCamera(); onClose(); }} className="p-1 rounded-full text-gray-500 hover:text-gray-900">
+                    <button onClick={() => { stopScanner(); onClose(); }} className="p-1 rounded-full text-gray-500 hover:text-gray-900">
                         <X className="w-6 h-6" />
                     </button>
                 </header>
 
-                {/* 狀態顯示 */}
-                {isLoading && (
-                    <div className={`w-full p-4 mb-4 rounded-lg bg-yellow-100 text-yellow-800 flex items-center justify-center`}>
-                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-yellow-800" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        正在呼叫 AI 分析影像，請稍候...
-                    </div>
-                )}
-                
                 {scanError ? (
                     <div className="text-red-600 bg-red-100 p-4 rounded-lg w-full mb-4 text-center">
                         {scanError}
                     </div>
                 ) : (
-                    <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden mb-4 border-4 border-dashed border-white">
+                    <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden mb-4 border-4 border-dashed border-green-400">
                         {/* 攝像頭視訊輸出 */}
                         <video 
                             ref={videoRef} 
                             className="w-full h-full object-cover" 
+                            // 條碼掃描使用後置鏡頭 (environment)，應保持畫面方向一致，不進行鏡像翻轉。
                             playsInline 
                             muted
                         ></video>
-                        {/* 掃描對焦框 */}
+                        {/* 掃描對焦框 - 使用 Tailwind 模擬 */}
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                            <div className="absolute w-4/5 h-4/5 border-4 border-yellow-400 border-opacity-75 rounded-lg"></div>
+                            <div className="w-4/5 h-1 bg-green-500 opacity-75 animate-pulse"></div>
+                            <div className="absolute w-4/5 h-4/5 border-4 border-green-500 border-opacity-75 rounded-lg"></div>
                         </div>
                     </div>
                 )}
                 
-                {/* 動作按鈕 */}
-                {isCapturing && !scanError && (
+                {/* 模擬掃描成功按鈕 */}
+                {isScanning && !scanError && (
                     <button
-                        onClick={handleCaptureAndAnalyze}
-                        className={`w-full p-3 mb-3 rounded-lg text-white font-semibold shadow-lg transition-all ${themePrimary} ${themeHover} flex items-center justify-center`}
-                        disabled={isLoading}
+                        onClick={handleSimulatedScan}
+                        className={`w-full p-3 mb-3 rounded-lg text-white font-semibold shadow-lg transition-all ${themePrimary} ${themeHover}`}
                     >
-                        <Camera className="w-5 h-5 mr-2" />
-                        擷取畫面並由 AI 自動分析
+                        模擬掃描成功並使用條碼 (EAN: 4710123456789)
                     </button>
                 )}
 
-                {/* 模擬按鈕 (用於測試) */}
-                 <button
-                    onClick={handleSimulatedAnalysis}
-                    className="w-full p-3 mb-3 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-lg transition-all"
-                    disabled={isLoading}
-                >
-                    模擬 AI 分析成功 (測試用)
-                </button>
-
-
                 <button
-                    onClick={() => { stopCamera(); onClose(); }}
-                    className="w-full p-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg shadow-lg transition-all"
-                    disabled={isLoading}
+                    onClick={() => { stopScanner(); onClose(); }}
+                    className="w-full p-3 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-lg transition-all"
                 >
-                    關閉
+                    關閉掃描器
                 </button>
             </div>
         </div>
@@ -383,10 +321,11 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
 
 
 // -----------------------------------------------------------------------------
-// 4. 主應用程式元件 (App Component)
+// 6. 主應用程式元件 (App Component)
 // -----------------------------------------------------------------------------
 
 function App() {
+    // 使用 Local Storage 替換 Firebase
     const { userId, isAuthReady, currentTheme, saveUserTheme } = useLocalMVPSetup();
     
     // UI 狀態管理
@@ -395,7 +334,7 @@ function App() {
     const [currentPrice, setCurrentPrice] = useState('');
     const [discountDetails, setDiscountDetails] = useState(''); 
     const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
-    const [isCaptureModalOpen, setIsCaptureModalOpen] = useState(false); 
+    const [isScannerModalOpen, setIsScannerModalOpen] = useState(false); 
     const [comparisonResult, setComparisonResult] = useState({
         isBest: false,
         bestPrice: null,
@@ -405,7 +344,6 @@ function App() {
     const [isLoading, setIsLoading] = useState(false); 
     const [lookupStatus, setLookupStatus] = useState('ready'); 
     const [statusMessage, setStatusMessage] = useState(''); 
-    const [storeName, setStoreName] = useState(''); // 新增商店名稱狀態
 
     // -----------------------------------------------------------------------------
     // 產品識別邏輯 (Local Storage 版本)
@@ -421,25 +359,30 @@ function App() {
         const numericalID = djb2Hash(barcodeData);
         
         try {
+            // 模擬延遲
             await new Promise(r => setTimeout(r, 200)); 
             
+            // 從 Local Storage 讀取產品主檔
             const productsJson = localStorage.getItem('MVP_PRODUCTS') || '{}';
             const products = JSON.parse(productsJson);
 
             if (products[numericalID]) {
                 setProductName(products[numericalID].productName);
                 setLookupStatus('found');
+                console.log("產品已識別 (Local Storage):", products[numericalID].productName);
             } else {
                 setProductName('');
                 setLookupStatus('new');
+                console.log("新產品，請手動輸入名稱。");
             }
         } catch (error) {
             console.error("查詢產品失敗 (Local Storage):", error);
             setLookupStatus('ready');
         }
-    }, []);
+    }, []); // 移除 db 依賴項
 
     useEffect(() => {
+        // 當條碼輸入改變且應用程式準備就緒時，觸發產品查詢
         if (barcode.length > 0 && isAuthReady) {
             const timer = setTimeout(() => {
                 lookupProduct(barcode);
@@ -458,25 +401,19 @@ function App() {
         }
     }, [statusMessage]);
 
-    // 處理 AI 分析成功並填入欄位
-    const handleAiCaptureSuccess = useCallback((result) => {
-        const { scannedBarcode, extractedPrice, storeName, discountDetails } = result;
-        
-        // 1. 自動填入條碼
-        if (scannedBarcode && scannedBarcode.length > 5) {
-            setBarcode(scannedBarcode);
-        } else if (!barcode) {
-             setStatusMessage("AI 未能識別條碼，請手動輸入或確保條碼清晰！");
-        }
+    // 模擬 OCR 函數 (Placeholder)
+    const performOCRAnalysis = useCallback(async (base64Image) => {
+        console.log("正在模擬 OCR 分析...");
+        await new Promise(r => setTimeout(r, 1500)); // 模擬 API 延遲
 
-        // 2. 自動填入價格、商店、折扣
-        setCurrentPrice(extractedPrice || '');
-        setStoreName(storeName || '');
-        setDiscountDetails(discountDetails || '');
+        // 模擬結構化輸出 - 包含優惠細節
+        return {
+            storeName: '模擬超商 (OCR)',
+            price: (Math.random() * 50 + 100).toFixed(2), // 隨機價格
+            discountDetails: '買二送一優惠 / 單件 $120 / 有效期限 2026/01/01', 
+        };
+    }, []);
 
-        setStatusMessage(`AI 分析成功！價格: $${extractedPrice || '?'}, 商店: ${storeName || '?'}, 折扣: ${discountDetails || '無'}`);
-    }, [barcode]);
-    
     // 儲存並比價函數 (Local Storage 版本)
     const saveAndComparePrice = useCallback(async () => {
         const numericalID = djb2Hash(barcode);
@@ -504,14 +441,16 @@ function App() {
                     productName,
                     createdAt: new Date().toISOString(),
                 };
+                // 儲存回 Local Storage
                 localStorage.setItem('MVP_PRODUCTS', JSON.stringify(products));
+                console.log("已創建新的產品主檔 (Local Storage)。");
             }
             
             // 1. 儲存新的價格紀錄
             const priceRecord = {
                 numericalID,
                 productName,
-                storeName: storeName || "手動輸入",
+                storeName: comparisonResult.bestStore || "手動輸入",
                 price: priceValue,
                 discountDetails: discountDetails, 
                 timestamp: new Date().toISOString(),
@@ -519,6 +458,7 @@ function App() {
             };
             
             allRecords.push(priceRecord);
+            // 儲存回 Local Storage
             localStorage.setItem('MVP_PRICE_RECORDS', JSON.stringify(allRecords));
             
             // 2. 執行比價邏輯 - 查詢該產品所有歷史紀錄
@@ -528,11 +468,13 @@ function App() {
                 setComparisonResult({ 
                     isBest: true, 
                     bestPrice: priceValue,
-                    bestStore: storeName || "手動輸入",
+                    bestStore: comparisonResult.bestStore || "手動輸入",
                     message: '這是第一筆紀錄！' 
                 });
             } else {
+                // 找出所有紀錄中的最低標價
                 const bestDeal = records.reduce((best, cur) => cur.price < best.price ? cur : best);
+                
                 const isCurrentBest = priceRecord.price <= bestDeal.price;
                 
                 // 比較邏輯：標價最低優先；標價相同則有折扣優先
@@ -554,7 +496,33 @@ function App() {
         } finally {
             setIsLoading(false);
         }
-    }, [userId, barcode, productName, currentPrice, discountDetails, storeName]); 
+    }, [userId, barcode, productName, currentPrice, discountDetails, comparisonResult.bestStore]); 
+
+    // 處理條碼掃描成功
+    const handleScanSuccess = useCallback((scannedBarcode) => {
+        setBarcode(scannedBarcode); 
+        setStatusMessage(`條碼掃描成功！已自動填入條碼: ${scannedBarcode}`);
+    }, []);
+
+    // 條碼掃描功能點擊處理：打開 Modal
+    const handleBarcodeScanClick = () => {
+        setIsScannerModalOpen(true);
+    };
+
+    // 處理 OCR 成功
+    const handleOcrSuccess = useCallback((result) => {
+        // 自動填入 OCR 結果
+        setCurrentPrice(result.price);
+        setComparisonResult(prev => ({ ...prev, bestStore: result.storeName })); 
+        setDiscountDetails(result.discountDetails); 
+        setStatusMessage(`OCR 成功！價格: $${result.price}, 商店: ${result.storeName}。優惠: ${result.discountDetails}`);
+    }, []);
+
+    // 處理 OCR 失敗
+    const handleOcrError = useCallback((error) => {
+        setStatusMessage(`OCR 失敗: ${error.message}`);
+    }, []);
+
 
     // 主題變數，用於動態 Tailwind 類別
     const themePrimary = currentTheme.primary;
@@ -578,6 +546,7 @@ function App() {
 
 
     if (!isAuthReady) {
+        // 雖然理論上 Local Storage 總是 ready，但保留此防呆
         return (
             <div className="flex items-center justify-center min-h-screen bg-gray-50">
                 <p className="text-xl text-gray-700">正在初始化本地應用程式...</p>
@@ -586,14 +555,16 @@ function App() {
     }
 
     return (
+        // 應用程式主容器，使用動態主題色
         <div className={`min-h-screen p-4 sm:p-8 ${themeLight}`}>
             <div className="max-w-xl mx-auto">
                 <header className="flex justify-between items-center mb-6 border-b pb-4">
                     <h1 className={`text-3xl font-extrabold ${themeText} flex items-center`}>
                         <Barcode className="w-8 h-8 mr-2" />
-                        條碼比價神器 (MVP-AI)
+                        條碼比價神器 (MVP-本地儲存)
                     </h1>
                     <div className="flex items-center space-x-3">
+                        {/* 主題切換按鈕 */}
                         <button 
                             onClick={() => setIsThemeModalOpen(true)}
                             className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`}
@@ -605,50 +576,34 @@ function App() {
                     </div>
                 </header>
 
-                {/* 狀態訊息提示 */}
+                {/* 狀態訊息提示 (取代 Alert) */}
                 {statusMessage && (
                     <div className="bg-red-500 text-white p-3 rounded-lg shadow-md mb-4 text-center font-medium transition-opacity duration-300">
                         {statusMessage}
                     </div>
                 )}
 
-                {/* 整合流程卡片：AI 擷取入口 */}
+                {/* 整合流程卡片：產品識別、價格紀錄與 OCR */}
                 <div className={`p-6 rounded-xl shadow-2xl bg-white border-t-4 ${themeBorder}`}>
                     <h2 className={`text-xl font-semibold ${themeText} mb-6 flex items-center`}>
-                        <Zap className="w-5 h-5 mr-2" /> 
-                        步驟 1: AI 視覺自動擷取資料
+                        <Search className="w-5 h-5 mr-2" /> 
+                        產品識別、價格紀錄與比價
                     </h2>
                     
-                    {/* AI 擷取按鈕 - 開啟 Modal */}
-                    <button 
-                        className={`w-full p-4 rounded-lg text-white font-bold text-lg shadow-xl transition-all ${themePrimary} hover:opacity-80 flex items-center justify-center`}
-                        onClick={() => setIsCaptureModalOpen(true)}
-                    >
-                        <Camera className="inline-block w-6 h-6 mr-3" /> 
-                        開啟鏡頭，擷取條碼與價目標籤
-                    </button>
-                    
-                    <hr className="my-6 border-gray-200" />
-
-                    <h2 className={`text-xl font-semibold text-gray-700 mb-4 flex items-center`}>
-                        <FileText className="w-5 h-5 mr-2" /> 
-                        步驟 2: 檢查或手動輸入資料
-                    </h2>
-
                     {/* 條碼輸入區 */}
-                    <div className="mb-4">
+                    <div className="mb-6">
                         <label className="block text-gray-700 font-medium mb-1">條碼數據 (Barcode Data)</label>
                         <input
                             type="text"
                             value={barcode}
                             onChange={(e) => setBarcode(e.target.value)}
-                            placeholder="AI 自動填入，或手動輸入"
+                            placeholder="掃描或手動輸入條碼 (EAN/UPC)"
                             className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
                         />
                     </div>
                     
                     {/* 產品名稱區 - 配合自動查詢 */}
-                    <div className="mb-4">
+                    <div className="mb-6">
                         <label className="block text-gray-700 font-medium mb-1">產品名稱 (Product Name)</label>
                         <input
                             type="text"
@@ -657,7 +612,7 @@ function App() {
                             placeholder={productNamePlaceholder}
                             className={`w-full p-3 border border-gray-300 rounded-lg transition 
                                 ${lookupStatus === 'found' ? 'bg-green-50' : lookupStatus === 'new' ? 'bg-yellow-50' : ''}`}
-                            readOnly={lookupStatus === 'found'} 
+                            readOnly={lookupStatus === 'found'} // 找到後鎖定
                         />
                         <p className="text-sm text-gray-500 mt-1">
                             數值 ID (Hash): {barcode ? djb2Hash(barcode) : '尚未計算'}
@@ -667,12 +622,12 @@ function App() {
                     {/* 價格與商店輸入/OCR 區 */}
                     <div className="grid grid-cols-2 gap-4 mb-4">
                         <div>
-                            <label className="block text-gray-700 font-medium mb-1">標價 ($) <span className="text-red-500">*</span></label>
+                            <label className="block text-gray-700 font-medium mb-1">標價 ($)</label>
                             <input
                                 type="number"
                                 value={currentPrice}
                                 onChange={(e) => setCurrentPrice(e.target.value)}
-                                placeholder="AI 擷取"
+                                placeholder="價格 (手動輸入)"
                                 className="w-full p-3 border border-gray-300 rounded-lg"
                             />
                         </div>
@@ -680,9 +635,9 @@ function App() {
                             <label className="block text-gray-700 font-medium mb-1">商店名稱</label>
                             <input
                                 type="text"
-                                value={storeName} 
-                                onChange={(e) => setStoreName(e.target.value)}
-                                placeholder="AI 擷取"
+                                value={comparisonResult.bestStore || ''} // 這裡用來顯示 OCR 或手動輸入的商店
+                                onChange={(e) => setComparisonResult(prev => ({ ...prev, bestStore: e.target.value }))}
+                                placeholder="商店名稱"
                                 className="w-full p-3 border border-gray-300 rounded-lg"
                             />
                         </div>
@@ -695,11 +650,57 @@ function App() {
                             type="text"
                             value={discountDetails}
                             onChange={(e) => setDiscountDetails(e.target.value)}
-                            placeholder="AI 擷取 (例如: 買二送一, 第二件半價)"
+                            placeholder="例如: 買二送一, 第二件半價, 組合價 $150"
                             className="w-full p-3 border border-gray-300 rounded-lg"
                         />
                     </div>
 
+                    {/* 動作按鈕群組 */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* 條碼掃描 - 現在會打開 Modal */}
+                        <button 
+                            className={`p-3 rounded-lg text-white font-semibold shadow-lg transition-all bg-gray-500 hover:bg-gray-600`}
+                            onClick={handleBarcodeScanClick}
+                        >
+                            <Camera className="inline-block w-5 h-5 mr-2" /> 啟動條碼掃描
+                        </button>
+                        
+                        {/* 價格 OCR */}
+                        <button 
+                            className={`p-3 rounded-lg text-white font-semibold shadow-lg transition-all ${themePrimary} hover:opacity-80`}
+                            onClick={() => document.getElementById('ocr-upload').click()}
+                            disabled={isLoading}
+                        >
+                            <Upload className="inline-block w-5 h-5 mr-2" /> 
+                            {isLoading ? 'OCR 分析中...' : '拍照/OCR 價格標籤'}
+                        </button>
+                        <input
+                            type="file"
+                            id="ocr-upload"
+                            accept="image/*"
+                            onChange={async (e) => {
+                                const file = e.target.files[0];
+                                if (!file) return;
+
+                                setIsLoading(true);
+                                try {
+                                    const reader = new FileReader();
+                                    reader.onloadend = async () => {
+                                        const base64Image = reader.result.split(',')[1];
+                                        const result = await performOCRAnalysis(base64Image);
+                                        handleOcrSuccess(result);
+                                    };
+                                    reader.readAsDataURL(file);
+                                } catch (error) {
+                                    handleOcrError(error);
+                                } finally {
+                                    setIsLoading(false);
+                                }
+                            }}
+                            className="hidden"
+                        />
+                    </div>
+                    
                     {/* 儲存紀錄並比價 */}
                     <button 
                         className={`w-full mt-4 p-3 rounded-lg text-white font-semibold shadow-lg transition-all bg-emerald-500 hover:bg-emerald-600`}
@@ -707,7 +708,7 @@ function App() {
                         disabled={isLoading}
                     >
                         <ClipboardCheck className="inline-block w-5 h-5 mr-2" /> 
-                        {isLoading ? '儲存並比價中...' : '步驟 3: 儲存紀錄並比價'}
+                        {isLoading ? '儲存並比價中...' : '儲存紀錄並比價'}
                     </button>
                 </div>
 
@@ -726,6 +727,7 @@ function App() {
                                 歷史最低標價: ${comparisonResult.bestPrice}
                             </p>
                         )}
+                        {/* 提示現在紀錄了詳細的優惠資訊 */}
                         <p className="text-xs text-gray-500 mt-2">
                             **附註:** 您的紀錄已儲存在瀏覽器的本地儲存中 (Local Storage)。
                         </p>
@@ -742,16 +744,17 @@ function App() {
                 />
             )}
 
-            {/* AI 視覺擷取 Modal */}
-            {isCaptureModalOpen && (
-                <AIOcrCaptureModal
+            {/* 條碼掃描 Modal - 掃描器介面 */}
+            {isScannerModalOpen && (
+                <BarcodeScannerModal
                     theme={currentTheme}
-                    onAnalysisSuccess={handleAiCaptureSuccess}
-                    onClose={() => setIsCaptureModalOpen(false)}
+                    onScanSuccess={handleScanSuccess}
+                    onClose={() => setIsScannerModalOpen(false)}
                 />
             )}
         </div>
     );
 }
 
+// 渲染應用程式
 export default App;

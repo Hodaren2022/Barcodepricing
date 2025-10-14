@@ -261,17 +261,39 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
 
             const systemPrompt = "你是一位專業的價目標籤和收據分析師。請從提供的影像中提取產品條碼（如果可見）、主要售價、商店名稱以及任何詳細的折扣或促銷資訊。請嚴格以 JSON 格式輸出。";
             const userPrompt = "分析此產品或價目標籤的影像，並提取所需的結構化資訊。請在 discountDetails 中提供所有相關的促銷訊息，例如買一送一、有效期限等。";
-            // API URL 指向我們的 Netlify Function
-            const apiUrl = `/.netlify/functions/gemini-proxy`;
+            const apiKey = "" 
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
 
-            // 準備傳遞給後端 Function 的資料
             const payload = {
-                systemPrompt,
-                userPrompt,
-                base64Image
+                contents: [{
+                    role: "user",
+                    parts: [
+                        { text: userPrompt },
+                        {
+                            inlineData: {
+                                mimeType: "image/jpeg",
+                                data: base64Image
+                            }
+                        }
+                    ]
+                }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            "scannedBarcode": { "type": "STRING", "description": "影像中找到的 EAN, UPC 或其他產品條碼數字，如果不可見則為空字串。" },
+                            "extractedPrice": { "type": "STRING", "description": "主要售價，格式為乾淨的字串，不帶貨幣符號（例如：'120.5'）。如果找不到價格則為空字串。" },
+                            "storeName": { "type": "STRING", "description": "價目標籤或收據所示的商店名稱。如果不可見則為空字串。" },
+                            "discountDetails": { "type": "STRING", "description": "發現的任何促銷或折扣的詳細描述（例如：'買一送一', '第二件半價', '有效期限 2026/01/01'）。如果沒有折扣則為空字串。" }
+                        },
+                        "required": ["scannedBarcode", "extractedPrice", "storeName", "discountDetails"]
+                    }
+                }
             };
             
-            // 呼叫後端 Function 並獲取結構化 JSON 結果
+            // 呼叫 API 並獲取結構化 JSON 結果
             const analysisResult = await callGeminiApiWithRetry(payload, apiUrl);
             
             // 傳回分析結果

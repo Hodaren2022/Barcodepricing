@@ -1,0 +1,722 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, addDoc } from 'firebase/firestore'; 
+
+// --- Firebase Configuration and Initialization ---
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+// The Quagga global object is assumed to be available via CDN script injection
+const Quagga = window.Quagga; 
+
+// Hardcoded list of local supermarkets for demonstration
+const STORES = ['家樂福 (Carrefour)', '全聯 (PX Mart)', '大潤發 (RT-Mart)', '美廉社 (Simple Mart)', '其他'];
+
+// Simple DJB2-like hash function optimized for speed and consistency
+function generateNumericalID(str) {
+    let hash = 5381;
+    let i = str.length;
+
+    while (i) {
+        hash = (hash * 33) ^ str.charCodeAt(--i);
+    }
+
+    return hash >>> 0;
+}
+
+// Custom hook to handle Firebase setup and user authentication
+const useFirebase = () => {
+    const [db, setDb] = useState(null);
+    const [userId, setUserId] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        if (Object.keys(firebaseConfig).length === 0) {
+            console.error("Firebase configuration is missing.");
+            setIsLoading(false);
+            return;
+        }
+
+        try {
+            const app = initializeApp(firebaseConfig);
+            const authInstance = getAuth(app);
+            const dbInstance = getFirestore(app);
+            setDb(dbInstance);
+
+            const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
+                if (user) {
+                    setUserId(user.uid);
+                    setIsLoading(false);
+                } else {
+                    try {
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(authInstance, initialAuthToken);
+                        } else {
+                            await signInAnonymously(authInstance);
+                        }
+                    } catch (error) {
+                        console.error("Firebase sign-in failed:", error);
+                        setIsLoading(false);
+                    }
+                }
+            });
+
+            return () => unsubscribe();
+        } catch (error) {
+            console.error("Firebase initialization failed:", error);
+            setIsLoading(false);
+        }
+    }, []);
+
+    return { db, userId, isLoading };
+};
+
+// Utility function to convert File to Base64
+const fileToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result.split(',')[1]); // Only data part
+        reader.onerror = (error) => reject(error);
+    });
+};
+
+// Main App Component
+const App = () => {
+    const { db, userId, isLoading } = useFirebase();
+    const [barcodeInput, setBarcodeInput] = useState('');
+    const [numericalID, setNumericalID] = useState(null);
+    const [statusMessage, setStatusMessage] = useState('等待輸入或啟用相機...');
+    const [isScanning, setIsScanning] = useState(false);
+    const [isDetected, setIsDetected] = useState(false);
+    const [isOCRCaptureMode, setIsOCRCaptureMode] = useState(false); // NEW: OCR Mode state
+    const [isOCRLoading, setIsOCRLoading] = useState(false); // NEW: OCR Loading state
+    
+    // Product Master Data States
+    const [productName, setProductName] = useState('');
+    const [isProductExist, setIsProductExist] = useState(false);
+
+    // Price Record States (Current Scan)
+    const [currentStore, setCurrentStore] = useState(STORES[0]);
+    const [currentPrice, setCurrentPrice] = useState('');
+    const [currentDiscount, setCurrentDiscount] = useState('');
+    
+    // Comparison Results State
+    const [comparisonData, setComparisonData] = useState([]); 
+    const [bestDeal, setBestDeal] = useState(null); 
+
+    const scannerRef = useRef(null);
+    const fileInputRef = useRef(null);
+
+    // Function to reset all product states
+    const resetStates = () => {
+        setNumericalID(null);
+        setProductName('');
+        setBarcodeInput('');
+        setCurrentPrice('');
+        setCurrentDiscount('');
+        setIsProductExist(false);
+        setComparisonData([]);
+        setBestDeal(null);
+        setIsOCRCaptureMode(false); // Reset OCR mode
+    }
+
+    // --- Gemini OCR Image Analysis Logic ---
+    const performOCRAnalysis = async (file) => {
+        if (!file) return;
+
+        setIsOCRLoading(true);
+        setStatusMessage('🚀 正在上傳圖片並進行 Gemini 圖像分析 (OCR)...');
+
+        try {
+            const base64ImageData = await fileToBase64(file);
+            
+            const systemPrompt = "你是一個專業的價格標籤分析師。請仔細分析提供的圖像，識別商店名稱、商品的標價（僅需數字部分，小數點後兩位），以及任何相關的優惠或折扣資訊。請以 JSON 格式輸出結果，不要添加任何解釋性文字。如果無法識別，請使用空字串或 0。";
+            const userQuery = "請從這張圖片中提取商店名稱、標價和優惠資訊。";
+            
+            const payload = {
+                contents: [
+                    {
+                        role: "user",
+                        parts: [
+                            { text: userQuery },
+                            {
+                                inlineData: {
+                                    mimeType: file.type,
+                                    data: base64ImageData
+                                }
+                            }
+                        ]
+                    }
+                ],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            "storeName": { "type": "STRING" },
+                            "price": { "type": "NUMBER" },
+                            "discountDetails": { "type": "STRING" }
+                        },
+                        "propertyOrdering": ["storeName", "price", "discountDetails"]
+                    }
+                }
+            };
+
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+            // --- Exponential Backoff for API Call ---
+            const maxRetries = 5;
+            let attempt = 0;
+            let result;
+
+            while (attempt < maxRetries) {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        if (response.status === 429) { // Rate limit hit
+                            const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            attempt++;
+                            continue; // Retry
+                        }
+                        throw new Error(`API call failed with status: ${response.status}`);
+                    }
+                    
+                    result = await response.json();
+                    break; // Success
+                } catch (error) {
+                    console.error(`Attempt ${attempt + 1} failed:`, error.message);
+                    if (attempt === maxRetries - 1) throw error;
+                    const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    attempt++;
+                }
+            }
+            // --- End Exponential Backoff ---
+
+            const jsonText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!jsonText) {
+                throw new Error("API response was empty or malformed.");
+            }
+            
+            const ocrData = JSON.parse(jsonText);
+            
+            // Update states with OCR results
+            if (ocrData.storeName) setCurrentStore(ocrData.storeName);
+            if (ocrData.price && !isNaN(parseFloat(ocrData.price))) setCurrentPrice(ocrData.price.toFixed(2));
+            if (ocrData.discountDetails) setCurrentDiscount(ocrData.discountDetails);
+            
+            setIsOCRCaptureMode(false);
+            setStatusMessage(`✅ 圖像分析完成。結果已自動填入：${ocrData.storeName} $${ocrData.price}`);
+            
+        } catch (e) {
+            console.error("OCR analysis error: ", e);
+            setStatusMessage(`🚫 圖像分析失敗。請手動輸入資訊。錯誤: ${e.message}`);
+            setIsOCRCaptureMode(false);
+        } finally {
+            setIsOCRLoading(false);
+        }
+    };
+    
+    // Handler for file input change
+    const handleFileChange = (event) => {
+        const file = event.target.files[0];
+        if (file) {
+            performOCRAnalysis(file);
+        }
+    };
+    
+    // --- Price Comparison Logic (Unchanged) ---
+    const fetchComparisonData = async (id, currentRecord) => {
+        if (!db) return;
+
+        const pricesRef = collection(db, `artifacts/${appId}/public/data/price_records`);
+        const q = query(pricesRef, where('numericalID', '==', id)); 
+        
+        try {
+            const querySnapshot = await getDocs(q);
+            let records = [];
+            
+            querySnapshot.forEach((doc) => {
+                records.push({ id: doc.id, ...doc.data() });
+            });
+
+            if (currentRecord) {
+                records.push({ ...currentRecord, isCurrentScan: true, id: 'current_scan' });
+            }
+
+            let lowestPriceRecord = null;
+            if (records.length > 0) {
+                lowestPriceRecord = records.reduce((min, record) => {
+                    return record.price < min.price ? record : min;
+                }, records[0]);
+            }
+            
+            setComparisonData(records);
+            setBestDeal(lowestPriceRecord);
+
+            return { lowestPriceRecord, records };
+
+        } catch (e) {
+            console.error("Error fetching comparison data: ", e);
+            setStatusMessage('🚫 歷史價格比較失敗。');
+            return { lowestPriceRecord: null, records: [] };
+        }
+    }
+
+    // --- Core Logic: Scan -> Lookup -> Compare (Unchanged) ---
+    const processBarcode = async (rawBarcodeData) => {
+        if (!rawBarcodeData.trim()) return;
+
+        resetStates(); 
+        
+        const calculatedNumericalID = generateNumericalID(rawBarcodeData);
+        setBarcodeInput(rawBarcodeData);
+        setNumericalID(calculatedNumericalID);
+        
+        setIsDetected(true);
+        setTimeout(() => setIsDetected(false), 500); 
+
+        setStatusMessage(`數值 ID: ${calculatedNumericalID} 已生成。正在查詢產品主檔...`);
+
+        if (db && userId) {
+            try {
+                // 1. Lookup Product Master Data
+                const productDocRef = doc(db, `artifacts/${appId}/public/data/products`, calculatedNumericalID.toString());
+                const productSnap = await getDoc(productDocRef);
+
+                if (productSnap.exists()) {
+                    const existingData = productSnap.data();
+                    setProductName(existingData.productName || '未命名產品');
+                    setIsProductExist(true);
+                    setStatusMessage(`產品: ${existingData.productName} 已載入。請進行 OCR 或手動輸入價格。`);
+                } else {
+                    // New product
+                    setIsProductExist(false);
+                    setStatusMessage('偵測到新產品。請先輸入產品名稱，然後進行 OCR 或輸入價格紀錄。');
+                }
+
+                // 2. Fetch all historical prices for comparison immediately
+                await fetchComparisonData(calculatedNumericalID);
+
+            } catch (e) {
+                console.error("Error accessing product master data: ", e);
+                setStatusMessage('數據庫查詢失敗，但數值 ID 已在本地生成。');
+            }
+        }
+    };
+    
+    // --- Save Price Record Logic (Unchanged) ---
+    const savePriceRecord = async () => {
+        if (!db || !userId || !barcodeInput.trim() || !productName.trim() || isNaN(parseFloat(currentPrice))) {
+            setStatusMessage('錯誤：請確保產品名稱和價格皆已輸入。');
+            return;
+        }
+
+        const priceValue = parseFloat(currentPrice);
+        const rawBarcodeData = barcodeInput.trim();
+        const calculatedNumericalID = generateNumericalID(rawBarcodeData);
+
+        const newPriceRecord = {
+            numericalID: calculatedNumericalID,
+            productName: productName.trim(),
+            storeName: currentStore,
+            price: priceValue,
+            discountDetails: currentDiscount.trim(),
+            timestamp: new Date().toISOString(),
+            recordedBy: userId,
+        };
+
+        try {
+            // Check if product master data needs creation/update
+            const productDocRef = doc(db, `artifacts/${appId}/public/data/products`, calculatedNumericalID.toString());
+            if (!isProductExist) {
+                 await setDoc(productDocRef, {
+                    numericalID: calculatedNumericalID,
+                    barcodeData: rawBarcodeData,
+                    productName: productName.trim(),
+                    createdAt: new Date().toISOString(),
+                    createdBy: userId,
+                });
+                setIsProductExist(true); 
+            } 
+
+            // 1. Save the new price record
+            await addDoc(collection(db, `artifacts/${appId}/public/data/price_records`), newPriceRecord);
+
+            // 2. Re-fetch and compare with the new record
+            await fetchComparisonData(calculatedNumericalID, newPriceRecord);
+            
+            setStatusMessage(`🎉 價格紀錄已儲存。當前紀錄 $${priceValue}。`);
+
+        } catch (e) {
+            console.error("Error saving price record: ", e);
+            setStatusMessage('🚫 價格資料儲存失敗。');
+        }
+    }
+    
+    // --- Input Handlers (Unchanged) ---
+    const handleManualScan = () => {
+        if (barcodeInput.trim()) {
+            processBarcode(barcodeInput);
+        }
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleManualScan();
+        }
+    };
+
+    // --- QuaggaJS/Scanning Logic (Unchanged) ---
+    useEffect(() => {
+        if (!isScanning && Quagga && typeof Quagga.stop === 'function') {
+            Quagga.stop();
+        }
+
+        if (isScanning && scannerRef.current && Quagga) {
+            resetStates(); 
+            setStatusMessage('相機啟用中，請對準條碼...');
+            
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: scannerRef.current,
+                    constraints: { facingMode: "environment" },
+                },
+                decoder: {
+                    readers: ["ean_reader", "code_128_reader", "code_39_reader", "upc_reader"],
+                    multiple: false 
+                },
+                locator: { patchSize: "medium", halfSample: true },
+                numOfWorkers: navigator.hardwareConcurrency || 2,
+                locate: true,
+            }, (err) => {
+                if (err) {
+                    console.error("Quagga initialization error:", err);
+                    setStatusMessage(`相機初始化失敗: ${err.name}。請檢查權限。`);
+                    setIsScanning(false);
+                    return;
+                }
+                Quagga.start();
+                setStatusMessage('相機掃描中... 嘗試辨識一維條碼。');
+            });
+
+            Quagga.onDetected((data) => {
+                const scannedCode = data.codeResult.code;
+                if (scannedCode) {
+                    Quagga.stop(); 
+                    setIsScanning(false);
+                    processBarcode(scannedCode);
+                }
+            });
+
+            return () => {
+                if (Quagga && typeof Quagga.stop === 'function') {
+                    Quagga.stop();
+                    Quagga.offDetected();
+                }
+            };
+        }
+    }, [isScanning, db, userId]);
+
+    if (isLoading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-gray-50">
+                <p className="text-xl font-medium text-indigo-600">載入中...</p>
+            </div>
+        );
+    }
+
+    // --- UI Components ---
+    
+    const ComparisonDisplay = () => {
+        if (comparisonData.length === 0) return null;
+        if (!bestDeal) return <p className="text-blue-600">目前沒有其他歷史價格紀錄。</p>;
+
+        const currentPriceFloat = parseFloat(currentPrice);
+        const isBestDeal = currentPriceFloat > 0 && currentPriceFloat === bestDeal.price;
+        
+        let comparisonMessage;
+        if (currentPriceFloat > 0 && isBestDeal) {
+            comparisonMessage = <p className="text-lg font-bold text-green-700">🎉 您當前掃描的價格就是目前資料庫中的最優惠價格!</p>;
+        } else if (currentPriceFloat > 0 && currentPriceFloat > bestDeal.price) {
+            comparisonMessage = (
+                <div className="text-lg font-bold text-red-700 space-y-2">
+                    <p>🚨 **注意: 價格不是最低!**</p>
+                    <div className="bg-red-50 p-3 rounded-lg border-l-4 border-red-500">
+                        <p className="font-normal text-sm text-gray-700">目前最優惠選項是:</p>
+                        <p className="font-extrabold text-xl text-red-800">
+                            ${bestDeal.price.toFixed(2)} @ {bestDeal.storeName}
+                        </p>
+                        {bestDeal.discountDetails && <p className="text-xs text-red-600">優惠: {bestDeal.discountDetails}</p>}
+                    </div>
+                </div>
+            );
+        } else {
+             comparisonMessage = <p className="text-lg font-bold text-blue-700">ℹ️ 已載入歷史價格，請輸入當前價格進行比較。</p>;
+        }
+
+        return (
+            <div className="pt-4 border-t border-gray-200 mt-4 space-y-4">
+                <h3 className="text-xl font-bold text-gray-900">3. 比價分析結果</h3>
+                
+                {comparisonMessage}
+
+                <details className="text-sm text-gray-600 p-2 bg-gray-50 rounded-lg cursor-pointer">
+                    <summary className="font-semibold text-gray-700">檢視所有 {comparisonData.length} 筆歷史紀錄</summary>
+                    <ul className="mt-2 space-y-1">
+                        {comparisonData
+                            .sort((a, b) => a.price - b.price)
+                            .map((record, index) => (
+                            <li key={index} className={`flex justify-between items-center py-1 px-2 rounded-md ${record.price === bestDeal.price ? 'bg-yellow-100 font-bold' : 'hover:bg-gray-100'}`}>
+                                <span>
+                                    {record.storeName} ({new Date(record.timestamp).toLocaleDateString()})
+                                </span>
+                                <span className="text-lg font-mono">
+                                    ${record.price.toFixed(2)}
+                                </span>
+                            </li>
+                        ))}
+                    </ul>
+                </details>
+            </div>
+        );
+    }
+    
+    // --- Render ---
+
+    return (
+        <div className="min-h-screen flex items-center justify-center p-4 bg-gray-100 font-inter">
+            <div className="w-full max-w-lg bg-white shadow-2xl rounded-xl p-8 space-y-6 transform transition duration-500 hover:scale-[1.02]">
+                <header className="text-center border-b pb-4">
+                    <h1 className="text-3xl font-extrabold text-gray-900">🛒 條碼比價神器 (OCR 啟動)</h1>
+                    <p className="text-sm text-gray-500 mt-1">透過 AI 圖像分析自動識別商店與價格</p>
+                </header>
+
+                <div className="space-y-4">
+                    {/* Mode Toggle Button */}
+                    <button
+                        onClick={() => {
+                            if (isScanning && Quagga) Quagga.stop();
+                            setIsScanning(!isScanning);
+                            setIsDetected(false); 
+                            resetStates();
+                        }}
+                        className={`w-full flex items-center justify-center px-6 py-3 text-base font-medium rounded-lg shadow-md transition duration-150 ease-in-out transform hover:scale-[1.01] ${
+                            isScanning ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                        }`}
+                    >
+                        {isScanning ? '停止掃描 / 切換至手動輸入' : '啟用相機條碼掃描'}
+                    </button>
+                    
+                    {/* Camera/Manual Input */}
+                    {(isScanning || !numericalID) && (
+                        <div className="space-y-4">
+                             {/* Camera Scanner View */}
+                            {isScanning && (
+                                <div className={`relative w-full aspect-video bg-gray-900 rounded-lg overflow-hidden border-4 transition duration-300 ${isDetected ? 'border-green-500 shadow-xl shadow-green-500/50' : 'border-indigo-500'}`}>
+                                    <div ref={scannerRef} style={{ width: '100%', height: '100%', position: 'absolute' }} />
+                                    
+                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                        <div className="w-3/4 h-1/2 border-4 border-white border-dashed opacity-80 rounded-lg relative">
+                                            <div className={`absolute top-1/2 left-0 right-0 h-0.5 transform -translate-y-1/2 transition duration-100 ${
+                                                isDetected ? 'bg-green-500' : 'bg-red-500 animate-pulse'
+                                            }`} 
+                                            ></div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="absolute bottom-0 left-0 right-0 text-center text-white text-sm font-semibold p-2 bg-gray-900/60">
+                                        {statusMessage}
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {/* Manual Input View */}
+                            {!isScanning && (
+                                <div className="space-y-4">
+                                    <label htmlFor="barcode" className="block text-lg font-medium text-gray-700">
+                                        1. 手動輸入條碼數據:
+                                    </label>
+                                    <input
+                                        type="text"
+                                        id="barcode"
+                                        value={barcodeInput}
+                                        onChange={(e) => setBarcodeInput(e.target.value)}
+                                        onKeyDown={handleKeyDown}
+                                        className="w-full px-4 py-3 border-2 border-indigo-300 rounded-lg shadow-inner focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 text-gray-800"
+                                        placeholder="例如: 產品 EAN 碼、SKU 碼..."
+                                    />
+                                    <button
+                                        onClick={handleManualScan}
+                                        className="w-full flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-lg shadow-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50 transition duration-150 ease-in-out transform hover:translate-y-[-2px] disabled:bg-indigo-400"
+                                        disabled={!barcodeInput.trim()}
+                                    >
+                                        查詢/生成數值 ID
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                {/* 產品資料區 - 只有成功掃描後才顯示 */}
+                {numericalID !== null && (
+                    <div className="border-t pt-6 space-y-4">
+                        <h2 className="text-xl font-bold text-gray-900">
+                            2. 產品資料與價格紀錄
+                        </h2>
+                        
+                        <div className="bg-indigo-50 border border-indigo-300 p-4 rounded-lg space-y-2">
+                            <p className="text-lg font-extrabold text-indigo-800 break-words">
+                                品名: {productName || '（請輸入名稱並儲存紀錄）'}
+                            </p>
+                            <p className="text-xs text-indigo-700">
+                                數值 ID: {numericalID} | 原始條碼: {barcodeInput}
+                            </p>
+                            {!isProductExist && (
+                                <InputField 
+                                    label="請為新產品命名 (必填)"
+                                    value={productName}
+                                    onChange={setProductName}
+                                    type="text"
+                                    placeholder="例如: 王子麵-原味"
+                                />
+                            )}
+                        </div>
+
+                        {/* OCR Capture Toggle */}
+                         <button
+                            onClick={() => {
+                                setIsOCRCaptureMode(true);
+                                // Trigger file input click when entering OCR mode
+                                if (fileInputRef.current) {
+                                    fileInputRef.current.click();
+                                }
+                            }}
+                            className="w-full flex items-center justify-center px-6 py-3 text-base font-medium rounded-lg shadow-md text-white bg-pink-500 hover:bg-pink-600 transition duration-150 transform hover:translate-y-[-1px]"
+                            disabled={isOCRLoading}
+                        >
+                            {isOCRLoading ? 'AI 圖像分析中...' : '📸 拍照/上傳價格標籤進行 OCR'}
+                        </button>
+                        
+                        {/* Hidden File Input for Image Capture */}
+                        <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment" // Hint to use back camera on mobile
+                            onChange={handleFileChange}
+                            ref={fileInputRef}
+                            style={{ display: 'none' }}
+                        />
+
+                        {/* Price Record Inputs (Manual/OCR Output) */}
+                        <div className="space-y-3 pt-4 border-t">
+                             <h3 className="text-lg font-semibold text-gray-700">新增當前價格紀錄 (可手動修改 OCR 結果)</h3>
+                            
+                            <InputField 
+                                label="商店 (Store) - 來自 OCR"
+                                value={currentStore}
+                                onChange={setCurrentStore}
+                                type="text" // Changed from SelectField to allow OCR output
+                                placeholder="例如: 家樂福"
+                            />
+                            <InputField 
+                                label="價格 (Price) - 來自 OCR / 必填"
+                                value={currentPrice}
+                                onChange={setCurrentPrice}
+                                type="number"
+                                placeholder="例如: 99.00"
+                            />
+                            <InputField 
+                                label="優惠細節 (Discount Details) - 來自 OCR"
+                                value={currentDiscount}
+                                onChange={setCurrentDiscount}
+                                type="text"
+                                placeholder="例如: 買一送一, 第二件六折"
+                            />
+                        </div>
+                        
+                        {/* Comparison Display */}
+                        <ComparisonDisplay />
+
+                        <button
+                            onClick={savePriceRecord}
+                            className={`w-full flex items-center justify-center px-6 py-3 text-base font-medium rounded-lg shadow-lg text-white transition duration-150 ease-in-out transform hover:translate-y-[-2px] bg-green-600 hover:bg-green-700 disabled:bg-gray-400`}
+                            disabled={!currentPrice.trim() || isNaN(parseFloat(currentPrice)) || !productName.trim()}
+                        >
+                            儲存當前價格紀錄並比價
+                        </button>
+                    </div>
+                )}
+                
+                {/* 狀態顯示區 */}
+                <div className="pt-4 border-t">
+                     <div className={`p-3 text-sm rounded-lg ${
+                        statusMessage.includes('失敗') ? 'bg-red-100 text-red-800' : 
+                        statusMessage.includes('注意') ? 'bg-yellow-100 text-yellow-800' : 
+                        statusMessage.includes('已載入') || statusMessage.includes('完成') ? 'bg-green-100 text-green-800' :
+                        'bg-blue-100 text-blue-800'
+                    }`}>
+                        <p className="font-semibold">當前狀態:</p>
+                        <p>{statusMessage}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// Simple reusable input component
+const InputField = ({ label, value, onChange, type, placeholder }) => (
+    <div>
+        <label className="block text-sm font-medium text-gray-700">
+            {label}
+        </label>
+        <input
+            type={type}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            placeholder={placeholder}
+        />
+    </div>
+);
+
+// SelectField is no longer used for Store, changed to InputField for direct OCR output.
+// Kept here for reference but removed from the main component's render.
+const SelectField = ({ label, value, onChange, options }) => (
+    <div>
+        <label className="block text-sm font-medium text-gray-700">
+            {label}
+        </label>
+        <select
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm bg-white"
+        >
+            {options.map((option) => (
+                <option key={option} value={option}>
+                    {option}
+                </option>
+            ))}
+        </select>
+    </div>
+);
+
+export default App;

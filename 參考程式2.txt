@@ -1,0 +1,634 @@
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { 
+    getFirestore, 
+    doc, 
+    getDoc, 
+    setDoc, 
+    collection, 
+    query, 
+    where, 
+    addDoc, 
+    getDocs, 
+    setLogLevel,
+    Timestamp 
+} from 'firebase/firestore';
+import { Upload, Camera, QrCode, RotateCcw, PaintBucket, DollarSign, Barcode, ClipboardCheck, Search } from 'lucide-react';
+
+// 設定 Firebase 日誌級別 (除錯用)
+// setLogLevel('debug'); 
+
+// -----------------------------------------------------------------------------
+// 1. 核心設定與工具函數 (Core Setup & Utilities)
+// -----------------------------------------------------------------------------
+
+// 獲取 Canvas 環境注入的變數
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+/**
+ * DJB2 雜湊算法：將條碼字串轉換為數值 ID (numericalID)。
+ * @param {string} str - 原始條碼字串
+ * @returns {number} - 32位元無符號整數
+ */
+function djb2Hash(str) {
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+        // hash * 33 + charCode
+        hash = ((hash << 5) + hash) + str.charCodeAt(i);
+    }
+    // 轉換為無符號 32 位整數
+    return hash >>> 0;
+}
+
+// -----------------------------------------------------------------------------
+// 2. 主題配置 (Theming Configuration) - 依據 SPEC 3.4
+// -----------------------------------------------------------------------------
+
+// 定義所有可選主題及其 Tailwind 顏色類別
+const THEMES = {
+    'Default (Indigo)': { 
+        primary: 'bg-indigo-600', 
+        light: 'bg-indigo-100', 
+        hover: 'hover:bg-indigo-700', 
+        border: 'border-indigo-600',
+        text: 'text-indigo-600',
+        color: 'indigo'
+    },
+    '海洋藍 (Ocean Blue)': { 
+        primary: 'bg-blue-600', 
+        light: 'bg-blue-100', 
+        hover: 'hover:bg-blue-700', 
+        border: 'border-blue-600',
+        text: 'text-blue-600',
+        color: 'blue'
+    },
+    '森林綠 (Forest Green)': { 
+        primary: 'bg-green-600', 
+        light: 'bg-green-100', 
+        hover: 'hover:bg-green-700', 
+        border: 'border-green-600',
+        text: 'text-green-600',
+        color: 'green'
+    },
+    '夕陽紅 (Sunset Red)': { 
+        primary: 'bg-red-600', 
+        light: 'bg-red-100', 
+        hover: 'hover:bg-red-700', 
+        border: 'border-red-600',
+        text: 'text-red-600',
+        color: 'red'
+    },
+    '活力橙 (Vibrant Orange)': { 
+        primary: 'bg-orange-600', 
+        light: 'bg-orange-100', 
+        hover: 'hover:bg-orange-700', 
+        border: 'border-orange-600',
+        text: 'text-orange-600',
+        color: 'orange'
+    },
+    '薰衣草紫 (Lavender)': { 
+        primary: 'bg-purple-600', 
+        light: 'bg-purple-100', 
+        hover: 'hover:bg-purple-700', 
+        border: 'border-purple-600',
+        text: 'text-purple-600',
+        color: 'purple'
+    },
+};
+
+const DEFAULT_THEME_KEY = 'Default (Indigo)';
+
+// -----------------------------------------------------------------------------
+// 3. 自定義 Hook - Firebase 初始化與認證 (useFirebase)
+// -----------------------------------------------------------------------------
+
+/**
+ * 處理 Firebase 的初始化、認證和狀態管理。
+ * @returns {object} 包含 db, auth, userId, isAuthReady, currentTheme, saveUserTheme 等狀態和物件。
+ */
+function useFirebase() {
+    const [db, setDb] = useState(null);
+    const [auth, setAuth] = useState(null);
+    const [userId, setUserId] = useState(null);
+    const [isAuthReady, setIsAuthReady] = useState(false);
+    const [currentTheme, setCurrentTheme] = useState(THEMES[DEFAULT_THEME_KEY]);
+
+    // 取得/設定用戶主題的函數
+    const getThemeRef = useCallback((dbInstance, uid) => {
+        if (!dbInstance || !uid) return null;
+        // 遵循 SPEC 4.0: artifacts/{appId}/users/{userId}/preferences/settings
+        return doc(dbInstance, 'artifacts', appId, 'users', uid, 'preferences', 'settings');
+    }, []);
+
+    // 載入用戶主題
+    const loadUserTheme = useCallback(async (dbInstance, uid) => {
+        const themeRef = getThemeRef(dbInstance, uid);
+        if (!themeRef) return;
+
+        try {
+            const docSnap = await getDoc(themeRef);
+            if (docSnap.exists()) {
+                const savedThemeKey = docSnap.data().theme;
+                const themeData = THEMES[savedThemeKey] || THEMES[DEFAULT_THEME_KEY];
+                setCurrentTheme(themeData);
+            } else {
+                setCurrentTheme(THEMES[DEFAULT_THEME_KEY]);
+            }
+        } catch (error) {
+            console.error("無法載入使用者主題:", error);
+            setCurrentTheme(THEMES[DEFAULT_THEME_KEY]);
+        }
+    }, [getThemeRef]);
+
+    // 儲存用戶主題
+    const saveUserTheme = useCallback(async (themeKey) => {
+        if (!db || !userId) return;
+        const themeRef = getThemeRef(db, userId);
+
+        try {
+            const dataToSave = { theme: themeKey };
+            // 使用 setDoc 覆蓋/創建文件
+            await setDoc(themeRef, dataToSave, { merge: true }); 
+            setCurrentTheme(THEMES[themeKey] || THEMES[DEFAULT_THEME_KEY]);
+            console.log("主題設定已儲存:", themeKey);
+        } catch (error) {
+            console.error("無法儲存使用者主題:", error);
+        }
+    }, [db, userId, getThemeRef]);
+
+    useEffect(() => {
+        try {
+            const app = initializeApp(firebaseConfig);
+            const firestoreDb = getFirestore(app);
+            const firebaseAuth = getAuth(app);
+            
+            setDb(firestoreDb);
+            setAuth(firebaseAuth);
+
+            // 設置身份驗證監聽器
+            const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+                if (user) {
+                    setUserId(user.uid);
+                    await loadUserTheme(firestoreDb, user.uid); // 認證後立即載入主題
+                } else {
+                    // 如果沒有用戶，嘗試使用自定義令牌或匿名登入
+                    try {
+                        if (initialAuthToken) {
+                            const userCredential = await signInWithCustomToken(firebaseAuth, initialAuthToken);
+                            setUserId(userCredential.user.uid);
+                            await loadUserTheme(firestoreDb, userCredential.user.uid);
+                        } else {
+                            const userCredential = await signInAnonymously(firebaseAuth);
+                            setUserId(userCredential.user.uid);
+                            await loadUserTheme(firestoreDb, userCredential.user.uid);
+                        }
+                    } catch (error) {
+                        console.error("Firebase 認證失敗:", error);
+                        // 即使認證失敗，也要標記為準備就緒，避免應用程式鎖死
+                        setUserId(crypto.randomUUID()); 
+                        setCurrentTheme(THEMES[DEFAULT_THEME_KEY]);
+                    }
+                }
+                setIsAuthReady(true);
+            });
+
+            return () => unsubscribe();
+        } catch (error) {
+            console.error("Firebase 初始化失敗:", error);
+            setIsAuthReady(true);
+        }
+    }, [loadUserTheme]);
+
+    return { db, auth, userId, isAuthReady, currentTheme, saveUserTheme };
+}
+
+// -----------------------------------------------------------------------------
+// 4. 主題選擇元件 (Theme Selector Component)
+// -----------------------------------------------------------------------------
+
+/**
+ * 顯示主題選擇面板的 Modal 元件。
+ */
+function ThemeSelector({ theme, saveTheme, onClose }) {
+    const handleThemeChange = (themeKey) => {
+        saveTheme(themeKey);
+    };
+
+    const handleReset = () => {
+        saveTheme(DEFAULT_THEME_KEY);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-gray-900 bg-opacity-75 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 transform transition-all">
+                <h3 className={`text-xl font-bold ${theme.text} mb-4 border-b pb-2`}>
+                    <PaintBucket className="inline-block w-5 h-5 mr-2" />
+                    介面配色選項
+                </h3>
+                
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                    {Object.keys(THEMES).map((themeKey) => {
+                        const themeData = THEMES[themeKey];
+                        const isSelected = theme.color === themeData.color;
+                        return (
+                            <button
+                                key={themeKey}
+                                onClick={() => handleThemeChange(themeKey)}
+                                className={`
+                                    p-3 rounded-lg text-white font-medium shadow-md transition-all 
+                                    ${themeData.primary} ${themeData.hover} 
+                                    ${isSelected ? 'ring-4 ring-offset-2 ring-opacity-70 ring-gray-400' : ''}
+                                `}
+                                style={{ transform: isSelected ? 'scale(1.05)' : 'scale(1)' }}
+                            >
+                                {themeKey}
+                            </button>
+                        );
+                    })}
+                </div>
+
+                <div className="flex justify-between items-center pt-4 border-t">
+                    <button
+                        onClick={handleReset}
+                        className="flex items-center text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+                    >
+                        <RotateCcw className="w-4 h-4 mr-1" />
+                        清除還原 (預設)
+                    </button>
+                    <button
+                        onClick={onClose}
+                        className={`px-4 py-2 text-white font-semibold rounded-lg shadow-lg ${theme.primary} ${theme.hover} transition-all`}
+                    >
+                        關閉
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// -----------------------------------------------------------------------------
+// 5. 主應用程式元件 (App Component)
+// -----------------------------------------------------------------------------
+
+function App() {
+    const { db, userId, isAuthReady, currentTheme, saveUserTheme } = useFirebase();
+    
+    // UI 狀態管理
+    const [barcode, setBarcode] = useState('');
+    const [productName, setProductName] = useState('');
+    const [currentPrice, setCurrentPrice] = useState('');
+    const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
+    const [comparisonResult, setComparisonResult] = useState({
+        isBest: false,
+        bestPrice: null,
+        bestStore: null,
+        message: '等待比價數據...'
+    });
+    const [isLoading, setIsLoading] = useState(false); // 通用載入狀態
+    const [lookupStatus, setLookupStatus] = useState('ready'); // 'ready', 'searching', 'found', 'new'
+
+    // -----------------------------------------------------------------------------
+    // 產品識別邏輯 (新增 - 配合單一步驟需求)
+    // -----------------------------------------------------------------------------
+    const lookupProduct = useCallback(async (barcodeData) => {
+        if (!db || !barcodeData) {
+            setProductName('');
+            setLookupStatus('ready');
+            return;
+        }
+        
+        if (barcodeData.length < 5) return; // 避免過短的輸入觸發查詢
+
+        setLookupStatus('searching');
+        const numericalID = djb2Hash(barcodeData);
+        
+        try {
+            // 遵循 SPEC 4.1 路徑: artifacts/{appId}/public/data/products/{numericalID}
+            const docRef = doc(db, `artifacts/${appId}/public/data/products`, numericalID.toString());
+            const docSnap = await getDoc(docRef);
+
+            if (docSnap.exists()) {
+                setProductName(docSnap.data().productName);
+                setLookupStatus('found');
+                console.log("產品已識別:", docSnap.data().productName);
+            } else {
+                setProductName('');
+                setLookupStatus('new');
+                console.log("新產品，請手動輸入名稱。");
+            }
+        } catch (error) {
+            console.error("查詢產品失敗:", error);
+            setLookupStatus('ready');
+        }
+    }, [db]);
+
+    useEffect(() => {
+        // 當條碼輸入改變且 Firebase 準備就緒時，觸發產品查詢
+        if (barcode.length > 0 && isAuthReady) {
+            // 設置一個小的延遲，避免連續輸入時過度觸發 Firestore 讀取
+            const timer = setTimeout(() => {
+                lookupProduct(barcode);
+            }, 500); 
+            return () => clearTimeout(timer); // 清除上一個計時器
+        }
+    }, [barcode, isAuthReady, lookupProduct]);
+
+
+    // 模擬 OCR 函數 (Placeholder)
+    const performOCRAnalysis = useCallback(async (base64Image) => {
+        console.log("正在模擬 OCR 分析...");
+        // 此處應為真實的 Gemini API 呼叫邏輯 (已在 SPEC 3.2 定義)
+        await new Promise(r => setTimeout(r, 1500)); // 模擬 API 延遲
+
+        // 模擬結構化輸出
+        return {
+            storeName: '模擬超商 (OCR)',
+            price: (Math.random() * 50 + 100).toFixed(2), // 隨機價格
+            discountDetails: '買二送一優惠 (OCR 模擬)',
+        };
+    }, []);
+
+    // 儲存並比價函數
+    const saveAndComparePrice = useCallback(async () => {
+        // 在儲存前，檢查產品主檔是否存在，若不存在則先創建
+        const numericalID = djb2Hash(barcode);
+        const priceValue = parseFloat(currentPrice);
+
+        if (!userId || !barcode || !productName || isNaN(priceValue)) {
+            alert("請確保已輸入條碼、產品名稱和有效價格！");
+            return;
+        }
+
+        setIsLoading(true);
+        
+        try {
+            // 0. 檢查並創建產品主檔 (如果不存在)
+            const productDocRef = doc(db, `artifacts/${appId}/public/data/products`, numericalID.toString());
+            const productDocSnap = await getDoc(productDocRef);
+
+            if (!productDocSnap.exists()) {
+                await setDoc(productDocRef, {
+                    numericalID,
+                    barcodeData: barcode,
+                    productName,
+                    createdAt: new Date().toISOString(),
+                });
+                console.log("已創建新的產品主檔。");
+            }
+            
+            // 1. 儲存新的價格紀錄 (SPEC 3.3)
+            const priceRecord = {
+                numericalID,
+                productName,
+                storeName: comparisonResult.bestStore || "手動輸入",
+                price: priceValue,
+                discountDetails: "無", // 暫時為無，等待未來 OCR 完善
+                timestamp: new Date().toISOString(),
+                recordedBy: userId,
+            };
+            
+            // 遵循 SPEC 4.2 路徑
+            const recordsRef = collection(db, `artifacts/${appId}/public/data/price_records`);
+            await addDoc(recordsRef, priceRecord);
+            
+            // 2. 執行比價邏輯 (SPEC 3.3) - 查詢所有歷史紀錄
+            const q = query(recordsRef, where("numericalID", "==", numericalID));
+            const snapshot = await getDocs(q);
+            const records = snapshot.docs.map(d => d.data());
+
+            if (records.length <= 1) { // 由於剛儲存了一筆，所以是 <= 1
+                setComparisonResult({ isBest: true, message: '這是第一筆紀錄！' });
+            } else {
+                // 找出所有紀錄中的最低價
+                const bestDeal = records.reduce((best, cur) => cur.price < best.price ? cur : best);
+                
+                // 檢查當前價格是否為最低價
+                const isCurrentBest = priceRecord.price <= bestDeal.price;
+                setComparisonResult({
+                    isBest: isCurrentBest,
+                    bestPrice: bestDeal.price,
+                    bestStore: bestDeal.storeName,
+                    message: isCurrentBest 
+                        ? '恭喜！這是目前紀錄中的最低價！' 
+                        : `非最低價。歷史最低價為 $${bestDeal.price} (商店: ${bestDeal.storeName})`
+                });
+            }
+
+        } catch (error) {
+            console.error("儲存或比價失敗:", error);
+            alert("數據操作失敗，請檢查網路或權限。");
+        } finally {
+            setIsLoading(false);
+        }
+    }, [db, userId, barcode, productName, currentPrice, comparisonResult.bestStore]);
+
+    // 主題變數，用於動態 Tailwind 類別
+    const themePrimary = currentTheme.primary;
+    const themeText = currentTheme.text;
+    const themeLight = currentTheme.light;
+    const themeBorder = currentTheme.border;
+
+    // 根據查詢狀態顯示產品名稱提示
+    const productNamePlaceholder = useMemo(() => {
+        switch(lookupStatus) {
+            case 'searching':
+                return '正在查詢產品資料...';
+            case 'found':
+                return '產品名稱已自動載入';
+            case 'new':
+                return '產品不存在，請手動輸入名稱';
+            default:
+                return '請先輸入條碼或掃描條碼';
+        }
+    }, [lookupStatus]);
+
+
+    if (!isAuthReady) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-gray-50">
+                <p className="text-xl text-gray-700">正在連接比價系統...</p>
+            </div>
+        );
+    }
+
+    return (
+        // 應用程式主容器，使用動態主題色
+        <div className={`min-h-screen p-4 sm:p-8 ${themeLight}`}>
+            <div className="max-w-xl mx-auto">
+                <header className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h1 className={`text-3xl font-extrabold ${themeText} flex items-center`}>
+                        <Barcode className="w-8 h-8 mr-2" />
+                        條碼比價神器
+                    </h1>
+                    <div className="flex items-center space-x-3">
+                        {/* 主題切換按鈕 */}
+                        <button 
+                            onClick={() => setIsThemeModalOpen(true)}
+                            className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`}
+                            title="設定介面主題"
+                        >
+                            <PaintBucket className="w-5 h-5" />
+                        </button>
+                        <p className="text-sm text-gray-500 hidden sm:block">用戶 ID: {userId}</p>
+                    </div>
+                </header>
+
+                {/* 整合流程卡片：產品識別、價格紀錄與 OCR */}
+                <div className={`p-6 rounded-xl shadow-2xl bg-white border-t-4 ${themeBorder}`}>
+                    <h2 className={`text-xl font-semibold ${themeText} mb-6 flex items-center`}>
+                        <Search className="w-5 h-5 mr-2" /> 
+                        產品識別、價格紀錄與比價
+                    </h2>
+                    
+                    {/* 條碼輸入區 */}
+                    <div className="mb-6">
+                        <label className="block text-gray-700 font-medium mb-1">條碼數據 (Barcode Data)</label>
+                        <input
+                            type="text"
+                            value={barcode}
+                            onChange={(e) => setBarcode(e.target.value)}
+                            placeholder="掃描或手動輸入條碼 (EAN/UPC)"
+                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                        />
+                    </div>
+                    
+                    {/* 產品名稱區 - 配合自動查詢 */}
+                    <div className="mb-6">
+                        <label className="block text-gray-700 font-medium mb-1">產品名稱 (Product Name)</label>
+                        <input
+                            type="text"
+                            value={productName}
+                            onChange={(e) => setProductName(e.target.value)}
+                            placeholder={productNamePlaceholder}
+                            className={`w-full p-3 border border-gray-300 rounded-lg transition 
+                                ${lookupStatus === 'found' ? 'bg-green-50' : lookupStatus === 'new' ? 'bg-yellow-50' : ''}`}
+                            readOnly={lookupStatus === 'found'} // 找到後鎖定
+                        />
+                        <p className="text-sm text-gray-500 mt-1">
+                            數值 ID (Hash): {barcode ? djb2Hash(barcode) : '尚未計算'}
+                        </p>
+                    </div>
+
+                    {/* 價格與商店輸入/OCR 區 */}
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label className="block text-gray-700 font-medium mb-1">標價 ($)</label>
+                            <input
+                                type="number"
+                                value={currentPrice}
+                                onChange={(e) => setCurrentPrice(e.target.value)}
+                                placeholder="價格 (手動輸入)"
+                                className="w-full p-3 border border-gray-300 rounded-lg"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-gray-700 font-medium mb-1">商店名稱</label>
+                            <input
+                                type="text"
+                                value={comparisonResult.bestStore || ''} // 這裡用來顯示 OCR 或手動輸入的商店
+                                onChange={(e) => setComparisonResult(prev => ({ ...prev, bestStore: e.target.value }))}
+                                placeholder="商店名稱"
+                                className="w-full p-3 border border-gray-300 rounded-lg"
+                            />
+                        </div>
+                    </div>
+
+                    {/* 動作按鈕群組 */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* 條碼掃描 */}
+                        <button 
+                            className={`p-3 rounded-lg text-white font-semibold shadow-lg transition-all bg-gray-500 hover:bg-gray-600`}
+                            onClick={() => alert('QuaggaJS 條碼掃描功能 Placeholder')}
+                        >
+                            <Camera className="inline-block w-5 h-5 mr-2" /> 啟動條碼掃描
+                        </button>
+                        
+                        {/* 價格 OCR */}
+                        <button 
+                            className={`p-3 rounded-lg text-white font-semibold shadow-lg transition-all ${themePrimary} hover:opacity-80`}
+                            onClick={() => document.getElementById('ocr-upload').click()}
+                            disabled={isLoading}
+                        >
+                            <Upload className="inline-block w-5 h-5 mr-2" /> 
+                            {isLoading ? 'OCR 分析中...' : '拍照/OCR 價格標籤'}
+                        </button>
+                        <input
+                            type="file"
+                            id="ocr-upload"
+                            accept="image/*"
+                            onChange={async (e) => {
+                                const file = e.target.files[0];
+                                if (!file) return;
+
+                                setIsLoading(true);
+                                try {
+                                    const reader = new FileReader();
+                                    reader.onloadend = async () => {
+                                        const base64Image = reader.result.split(',')[1];
+                                        const result = await performOCRAnalysis(base64Image);
+                                        
+                                        // 自動填入 OCR 結果
+                                        setCurrentPrice(result.price);
+                                        setComparisonResult(prev => ({ ...prev, bestStore: result.storeName })); 
+                                        
+                                        alert(`OCR 成功！價格: $${result.price}, 商店: ${result.storeName}`);
+                                    };
+                                    reader.readAsDataURL(file);
+                                } catch (error) {
+                                    alert(`OCR 失敗: ${error.message}`);
+                                } finally {
+                                    setIsLoading(false);
+                                }
+                            }}
+                            className="hidden"
+                        />
+                    </div>
+                    
+                    {/* 儲存紀錄並比價 */}
+                    <button 
+                        className={`w-full mt-4 p-3 rounded-lg text-white font-semibold shadow-lg transition-all bg-emerald-500 hover:bg-emerald-600`}
+                        onClick={saveAndComparePrice}
+                        disabled={isLoading}
+                    >
+                        <ClipboardCheck className="inline-block w-5 h-5 mr-2" /> 
+                        {isLoading ? '儲存並比價中...' : '儲存紀錄並比價'}
+                    </button>
+                </div>
+
+                {/* 比價結果顯示區 */}
+                <div className="mt-8">
+                    <h2 className={`text-xl font-semibold ${themeText} mb-4 flex items-center`}>
+                        <DollarSign className="w-5 h-5 mr-2" />
+                        比價結果
+                    </h2>
+                    <div className={`p-6 rounded-xl shadow-xl border-2 ${comparisonResult.isBest ? 'border-green-500 bg-green-50' : 'border-yellow-500 bg-yellow-50'}`}>
+                        <p className={`text-lg font-bold ${comparisonResult.isBest ? 'text-green-700' : 'text-yellow-700'}`}>
+                            {comparisonResult.message}
+                        </p>
+                        {comparisonResult.bestPrice && (
+                            <p className="text-sm text-gray-600 mt-2">
+                                歷史最低價: ${comparisonResult.bestPrice}
+                            </p>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* 主題選擇 Modal - 依據 SPEC 3.4 */}
+            {isThemeModalOpen && (
+                <ThemeSelector 
+                    theme={currentTheme} 
+                    saveTheme={saveUserTheme} 
+                    onClose={() => setIsThemeModalOpen(false)} 
+                />
+            )}
+        </div>
+    );
+}
+
+// 渲染應用程式
+export default App;

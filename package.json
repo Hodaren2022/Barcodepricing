@@ -1,0 +1,48 @@
+{
+  "name": "barcode-pricing-comparator",
+  "version": "1.0.0",
+  "description": "比價神器 - 條碼掃描與價格比較應用",
+  "main": "index.js",
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "dependencies": {
+    "autoprefixer": "^10.4.16",
+    "axios": "^1.5.1",
+    "firebase": "^10.5.0",
+    "lucide-react": "^0.545.0",
+    "postcss": "^8.4.31",
+    "quagga": "^0.12.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "tailwindcss": "^3.3.3",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@babel/plugin-transform-class-properties": "^7.23.3",
+    "@babel/plugin-transform-nullish-coalescing-operator": "^7.23.3",
+    "@babel/plugin-transform-numeric-separator": "^7.23.3",
+    "@babel/plugin-transform-optional-chaining": "^7.23.3",
+    "@babel/plugin-transform-private-methods": "^7.23.3",
+    "@babel/plugin-transform-private-property-in-object": "^7.23.3",
+    "@types/react": "^18.2.25",
+    "@types/react-dom": "^18.2.10",
+    "eslint": "^9.0.0"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}

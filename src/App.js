@@ -180,33 +180,34 @@ function ThemeSelector({ theme, saveTheme, onClose }) {
 function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
     const videoRef = useRef(null);
     const streamRef = useRef(null);
-    const [isCapturing, setIsCapturing] = useState(false);
+    const [isCameraOn, setIsCameraOn] = useState(false);
     const [scanError, setScanError] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [capturedImage, setCapturedImage] = useState(null); // 新增狀態：儲存擷取的圖片
 
     // 取得攝影機畫面
     const startCamera = useCallback(async () => {
         setScanError('');
+        setCapturedImage(null); // 清除舊圖片
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { 
-                    facingMode: "environment", // 使用後置鏡頭
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
-                } 
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: "environment",
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
             });
             streamRef.current = stream;
-            
+
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
                 await videoRef.current.play();
-                setIsCapturing(true);
+                setIsCameraOn(true);
             }
-            
         } catch (err) {
             console.error("無法存取攝影機:", err);
             setScanError(`無法存取攝影機或權限被拒絕。請檢查瀏覽器設定。 (${err.name} - ${err.message})`);
-            setIsCapturing(false);
+            setIsCameraOn(false);
         }
     }, []);
 
@@ -216,7 +217,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
             streamRef.current.getTracks().forEach(track => track.stop());
             streamRef.current = null;
         }
-        setIsCapturing(false);
+        setIsCameraOn(false);
     }, []);
 
     // 處理 Modal 開啟/關閉時的生命週期
@@ -227,69 +228,63 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
         };
     }, [startCamera, stopCamera]);
 
-
-    // 擷取視訊畫面並轉換為 Base64 (JPG) 數據
-    const captureImage = useCallback(() => {
-        if (!videoRef.current) return null;
+    // 擷取視訊中央 75% 畫面並轉換為 Base64
+    const handleCapture = useCallback(() => {
+        if (!videoRef.current) return;
 
         const video = videoRef.current;
         const canvas = document.createElement('canvas');
-        // 確保 canvas 尺寸與視訊畫面的解析度一致
-        canvas.width = video.videoWidth; 
-        canvas.height = video.videoHeight;
+        
+        const cropWidth = video.videoWidth * 0.75;
+        const cropHeight = video.videoHeight * 0.75;
+        const cropX = (video.videoWidth - cropWidth) / 2;
+        const cropY = (video.videoHeight - cropHeight) / 2;
+
+        canvas.width = cropWidth;
+        canvas.height = cropHeight;
 
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
 
-        // 將 canvas 內容轉換為 Base64 格式的 JPEG 圖片 (0.8 品質)
-        const base64Data = canvas.toDataURL('image/jpeg', 0.8);
-        
-        // 移除 MIME 類型前綴，只留下純 Base64 數據
-        return base64Data.split(',')[1];
-    }, []);
-    
+        const base64Data = canvas.toDataURL('image/jpeg', 0.9);
+        setCapturedImage(base64Data);
+        stopCamera(); // 擷取後停止攝影機
+
+    }, [stopCamera]);
+
     // 呼叫 Gemini API 進行視覺分析
-    const handleCaptureAndAnalyze = useCallback(async () => {
-        setIsLoading(true);
+    const handleAnalyze = useCallback(async () => {
+        if (!capturedImage) {
+            setScanError("沒有可分析的影像。");
+            return;
+        }
+        setIsAnalyzing(true);
         setScanError('');
-        
+
         try {
-            const base64Image = captureImage();
-            if (!base64Image) {
-                throw new Error("無法從攝影機擷取到影像。");
-            }
+            const base64Image = capturedImage.split(',')[1]; // 移除 MIME 類型前綴
 
             const systemPrompt = "你是一位專業的價目標籤和收據分析師。請從提供的影像中提取產品條碼（如果可見）、主要售價、商店名稱以及任何詳細的折扣或促銷資訊。請嚴格以 JSON 格式輸出。";
             const userPrompt = "分析此產品或價目標籤的影像，並提取所需的結構化資訊。請在 discountDetails 中提供所有相關的促銷訊息，例如買一送一、有效期限等。";
-            // API URL 指向我們的 Netlify Function
             const apiUrl = `/.netlify/functions/gemini-proxy`;
 
-            // 準備傳遞給後端 Function 的資料
-            const payload = {
-                systemPrompt,
-                userPrompt,
-                base64Image
-            };
-            
-            // 呼叫後端 Function 並獲取結構化 JSON 結果
+            const payload = { systemPrompt, userPrompt, base64Image };
+
             const analysisResult = await callGeminiApiWithRetry(payload, apiUrl);
-            
-            // 傳回分析結果
+
             onAnalysisSuccess(analysisResult);
-            stopCamera();
             onClose();
 
         } catch (error) {
             console.error("AI 分析失敗:", error);
             setScanError(`AI 分析錯誤: ${error.message}`);
         } finally {
-            setIsLoading(false);
+            setIsAnalyzing(false);
         }
-    }, [captureImage, onAnalysisSuccess, onClose, stopCamera]);
-    
-    // 模擬 AI 分析成功 (用於測試或無網路環境)
+    }, [capturedImage, onAnalysisSuccess, onClose]);
+
+    // 模擬 AI 分析成功
     const handleSimulatedAnalysis = () => {
-        stopCamera();
         const mockResult = {
             scannedBarcode: '4710123456789',
             extractedPrice: (Math.random() * 50 + 100).toFixed(0).toString(),
@@ -317,7 +312,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
                 </header>
 
                 {/* 狀態顯示 */}
-                {isLoading && (
+                {isAnalyzing && (
                     <div className={`w-full p-4 mb-4 rounded-lg bg-yellow-100 text-yellow-800 flex items-center justify-center`}>
                         <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-yellow-800" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -333,49 +328,75 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
                     </div>
                 ) : (
                     <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden mb-4 border-4 border-dashed border-white">
-                        {/* 攝像頭視訊輸出 */}
-                        <video 
-                            ref={videoRef} 
-                            className="w-full h-full object-cover" 
-                            playsInline 
-                            muted
-                        ></video>
-                        {/* 掃描對焦框 */}
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                            <div className="absolute w-4/5 h-4/5 border-4 border-yellow-400 border-opacity-75 rounded-lg"></div>
-                        </div>
+                        {capturedImage ? (
+                            <img src={capturedImage} alt="Captured" className="w-full h-full object-contain" />
+                        ) : (
+                            <video 
+                                ref={videoRef} 
+                                className="w-full h-full object-cover" 
+                                playsInline 
+                                muted
+                            ></video>
+                        )}
+                        {/* 掃描對焦框 (僅在攝影機開啟時顯示) */}
+                        {isCameraOn && (
+                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                <div className="w-[75%] h-[75%] border-4 border-yellow-400 border-opacity-75 rounded-lg shadow-lg"></div>
+                            </div>
+                        )}
                     </div>
                 )}
                 
                 {/* 動作按鈕 */}
-                {isCapturing && !scanError && (
+                <div className="w-full">
+                    {!capturedImage && isCameraOn && !scanError && (
+                        <button
+                            onClick={handleCapture}
+                            className={`w-full p-3 mb-3 rounded-lg text-white font-semibold shadow-lg transition-all ${themePrimary} ${themeHover} flex items-center justify-center`}
+                            disabled={isAnalyzing}
+                        >
+                            <Camera className="w-5 h-5 mr-2" />
+                            擷取畫面
+                        </button>
+                    )}
+
+                    {capturedImage && !scanError && (
+                        <div className="grid grid-cols-2 gap-4 mb-3">
+                            <button
+                                onClick={startCamera} // 重新拍攝
+                                className="w-full p-3 rounded-lg bg-gray-500 hover:bg-gray-600 text-white font-semibold shadow-lg transition-all flex items-center justify-center"
+                                disabled={isAnalyzing}
+                            >
+                                重新拍攝
+                            </button>
+                            <button
+                                onClick={handleAnalyze}
+                                className={`w-full p-3 rounded-lg text-white font-semibold shadow-lg transition-all ${themePrimary} ${themeHover} flex items-center justify-center`}
+                                disabled={isAnalyzing}
+                            >
+                                <Zap className="w-5 h-5 mr-2" />
+                                開始 AI 分析
+                            </button>
+                        </div>
+                    )}
+
+                    {/* 模擬按鈕 (用於測試) */}
                     <button
-                        onClick={handleCaptureAndAnalyze}
-                        className={`w-full p-3 mb-3 rounded-lg text-white font-semibold shadow-lg transition-all ${themePrimary} ${themeHover} flex items-center justify-center`}
-                        disabled={isLoading}
+                        onClick={handleSimulatedAnalysis}
+                        className="w-full p-3 mb-3 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-lg transition-all"
+                        disabled={isAnalyzing}
                     >
-                        <Camera className="w-5 h-5 mr-2" />
-                        擷取畫面並由 AI 自動分析
+                        模擬 AI 分析成功 (測試用)
                     </button>
-                )}
 
-                {/* 模擬按鈕 (用於測試) */}
-                 <button
-                    onClick={handleSimulatedAnalysis}
-                    className="w-full p-3 mb-3 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-lg transition-all"
-                    disabled={isLoading}
-                >
-                    模擬 AI 分析成功 (測試用)
-                </button>
-
-
-                <button
-                    onClick={() => { stopCamera(); onClose(); }}
-                    className="w-full p-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg shadow-lg transition-all"
-                    disabled={isLoading}
-                >
-                    關閉
-                </button>
+                    <button
+                        onClick={() => { stopCamera(); onClose(); }}
+                        className="w-full p-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg shadow-lg transition-all"
+                        disabled={isAnalyzing}
+                    >
+                        關閉
+                    </button>
+                </div>
             </div>
         </div>
     );

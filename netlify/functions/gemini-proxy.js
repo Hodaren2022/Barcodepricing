@@ -28,7 +28,7 @@ exports.handler = async (event, context) => {
     }
     
     // Google Gemini API 的端點
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
     // 構建與 Google API 規格相符的 payload
     const payload = {

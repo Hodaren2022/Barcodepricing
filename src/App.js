@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { PaintBucket, DollarSign, Barcode, ClipboardCheck, X, Camera, Zap, FileText, RotateCcw, Database } from 'lucide-react';
 import AllRecordsPage from './AllRecordsPage';
+import StoreSelector from './StoreSelector';
 
 // -----------------------------------------------------------------------------
 // 1. 核心設定與工具函數 (Core Setup & Utilities)
@@ -612,6 +613,9 @@ function App() {
     const [storeName, setStoreName] = useState(''); // 新增商店名稱狀態
     const [ocrResult, setOcrResult] = useState(null); // 新增OCR結果狀態，用於開發者確認
 
+    // 新增商店選擇器狀態
+    const [isStoreSelectorOpen, setIsStoreSelectorOpen] = useState(false);
+
     // 新增頁面狀態
     const [currentPage, setCurrentPage] = useState('main'); // 'main' or 'allRecords'
 
@@ -715,13 +719,19 @@ function App() {
         setStatusMessage(`AI 分析成功！產品: ${productName || '?'}, 價格: $${extractedPrice || '?'}, 商店: ${storeName || '?'}, 折扣: ${discountDetails || '無'}`);
     }, [barcode]);
     
-    // 儲存並比價函數 (Local Storage 版本)
+    // 修改儲存並比價函數 (Local Storage 版本)
     const saveAndComparePrice = useCallback(async () => {
         const numericalID = djb2Hash(barcode);
         const priceValue = parseFloat(currentPrice);
 
         if (!userId || !barcode || !productName || isNaN(priceValue)) {
             setStatusMessage("請確保已輸入條碼、產品名稱和有效價格！");
+            return;
+        }
+
+        // 檢查商店名稱是否為空
+        if (!storeName.trim()) {
+            setIsStoreSelectorOpen(true);
             return;
         }
 
@@ -800,6 +810,17 @@ function App() {
             setIsLoading(false);
         }
     }, [userId, barcode, productName, currentPrice, discountDetails, storeName]); 
+
+    // 處理商店選擇
+    const handleStoreSelect = useCallback((selectedStore) => {
+        setStoreName(selectedStore);
+        setIsStoreSelectorOpen(false);
+        
+        // 延遲執行儲存操作，確保狀態已更新
+        setTimeout(() => {
+            saveAndComparePrice();
+        }, 100);
+    }, [saveAndComparePrice]);
 
     // 主題變數，用於動態 Tailwind 類別
     const themePrimary = currentTheme.primary;
@@ -1046,6 +1067,15 @@ function App() {
                     theme={currentTheme}
                     onAnalysisSuccess={handleAiCaptureSuccess}
                     onClose={() => setIsCaptureModalOpen(false)}
+                />
+            )}
+
+            {/* 商店選擇 Modal */}
+            {isStoreSelectorOpen && (
+                <StoreSelector
+                    theme={currentTheme}
+                    onSelect={handleStoreSelect}
+                    onClose={() => setIsStoreSelectorOpen(false)}
                 />
             )}
         </div>

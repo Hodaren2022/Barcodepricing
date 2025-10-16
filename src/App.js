@@ -236,16 +236,42 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
         const video = videoRef.current;
         const canvas = document.createElement('canvas');
         
-        const cropWidth = video.videoWidth * 0.75;
-        const cropHeight = video.videoHeight * 0.75;
-        const cropX = (video.videoWidth - cropWidth) / 2;
-        const cropY = (video.videoHeight - cropHeight) / 2;
+        // 獲取影片的實際顯示尺寸 (受 CSS object-cover 和父容器 aspect-video 影響)
+        const renderedVideoWidth = video.offsetWidth;
+        const renderedVideoHeight = video.offsetHeight;
 
-        canvas.width = cropWidth;
-        canvas.height = cropHeight;
+        // 計算裁剪區域的尺寸 (75% of the rendered video area)
+        const targetCanvasWidth = renderedVideoWidth * 0.75;
+        const targetCanvasHeight = renderedVideoHeight * 0.75;
+
+        // 計算 intrinsic video 到 rendered video 的縮放比例 (object-cover)
+        const scaleFactor = Math.max(
+            renderedVideoWidth / video.videoWidth,
+            renderedVideoHeight / video.videoHeight
+        );
+
+        // 計算 intrinsic video 在 rendered video 內的偏移量
+        const scaledIntrinsicWidth = video.videoWidth * scaleFactor;
+        const scaledIntrinsicHeight = video.videoHeight * scaleFactor;
+        const offsetX = (renderedVideoWidth - scaledIntrinsicWidth) / 2;
+        const offsetY = (renderedVideoHeight - scaledIntrinsicHeight) / 2;
+
+        // 計算裁剪區域在 intrinsic video 中的起始點和尺寸
+        const captureX_rendered = (renderedVideoWidth - targetCanvasWidth) / 2;
+        const captureY_rendered = (renderedVideoHeight - targetCanvasHeight) / 2;
+
+        const sx = (captureX_rendered - offsetX) / scaleFactor;
+        const sy = (captureY_rendered - offsetY) / scaleFactor;
+        const sWidth = targetCanvasWidth / scaleFactor;
+        const sHeight = targetCanvasHeight / scaleFactor;
+
+        canvas.width = sWidth;
+        canvas.height = sHeight;
 
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
+
+        // 將裁剪後的 intrinsic video 區域繪製到 canvas 上
+        ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, sWidth, sHeight);
 
         const base64Data = canvas.toDataURL('image/jpeg', 0.9);
         
@@ -331,7 +357,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
                 ) : (
                     <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden mb-4 border-4 border-dashed border-white">
                         {capturedImage ? (
-                            <img src={capturedImage} alt="Captured" className="w-full h-full object-contain" />
+                            <img src={capturedImage} alt="Captured" className="w-full h-full object-cover" />
                         ) : (
                             <video 
                                 ref={videoRef} 

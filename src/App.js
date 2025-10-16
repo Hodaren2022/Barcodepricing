@@ -720,7 +720,7 @@ function App() {
     }, [barcode]);
     
     // 修改儲存並比價函數 (Local Storage 版本)
-    const saveAndComparePrice = useCallback(async () => {
+    const saveAndComparePrice = useCallback(async (skipStoreCheck = false) => {
         const numericalID = djb2Hash(barcode);
         const priceValue = parseFloat(currentPrice);
 
@@ -729,8 +729,8 @@ function App() {
             return;
         }
 
-        // 檢查商店名稱是否為空
-        if (!storeName.trim()) {
+        // 檢查商店名稱是否為空（除非跳過檢查）
+        if (!storeName.trim() && !skipStoreCheck) {
             setIsStoreSelectorOpen(true);
             return;
         }
@@ -816,9 +816,9 @@ function App() {
         setStoreName(selectedStore);
         setIsStoreSelectorOpen(false);
         
-        // 延遲執行儲存操作，確保狀態已更新
+        // 延遲執行儲存操作，確保狀態已更新，並跳過商店檢查
         setTimeout(() => {
-            saveAndComparePrice();
+            saveAndComparePrice(true); // 传递 true 以跳過商店檢查
         }, 100);
     }, [saveAndComparePrice]);
 

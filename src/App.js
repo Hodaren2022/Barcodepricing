@@ -69,6 +69,164 @@ async function callGeminiApiWithRetry(payload, apiUrl, maxRetries = 3) {
     throw lastError; // 所有重試失敗後拋出最後一個錯誤
 }
 
+// 放在 App 組件定義之前
+const CHART_WIDTH = 400; // SVG 寬度 (px)
+const CHART_HEIGHT = 150; // SVG 高度 (px)
+const PADDING = 20;
+
+function PriceTrendChart({ records, theme }) {
+    // 價格必須是數字，並且時間戳必須存在
+    const validRecords = records.filter(r => !isNaN(r.price) && r.timestamp);
+
+    if (validRecords.length < 2) {
+        return <p className="text-center text-sm text-gray-500">至少需要兩筆紀錄才能繪製趨勢圖。</p>;
+    }
+
+    // 1. 計算數據範圍
+    const prices = validRecords.map(r => r.price);
+    const minPrice = Math.min(...prices) * 0.95; // 讓圖表底部留一點空間
+    const maxPrice = Math.max(...prices) * 1.05; // 讓圖表頂部留一點空間
+    const priceRange = maxPrice - minPrice;
+
+    // 時間軸範圍
+    const minTimestamp = new Date(validRecords[validRecords.length - 1].timestamp).getTime();
+    const maxTimestamp = new Date(validRecords[0].timestamp).getTime();
+    const timeRange = maxTimestamp - minTimestamp;
+    
+    if (priceRange === 0) {
+        return <p className="text-center text-sm text-gray-500">價格沒有波動，無法繪製趨勢圖。</p>;
+    }
+
+    // 2. 轉換為 SVG 座標點字串
+    const points = validRecords.map(record => {
+        const timestamp = new Date(record.timestamp).getTime();
+        const price = record.price;
+
+        // X 座標：將時間映射到 CHART_WIDTH 範圍
+        const xRatio = (timestamp - minTimestamp) / timeRange;
+        const x = PADDING + xRatio * (CHART_WIDTH - 2 * PADDING);
+
+        // Y 座標：將價格映射到 CHART_HEIGHT 範圍 (注意：Y 軸在 SVG 中是倒置的)
+        const yRatio = (price - minPrice) / priceRange;
+        const y = CHART_HEIGHT - PADDING - yRatio * (CHART_HEIGHT - 2 * PADDING);
+
+        return `${x},${y}`;
+    }).join(' ');
+
+    // 取得第一個和最後一個點的 Y 座標，用於繪製趨勢線
+    const startPriceY = parseFloat(points.split(' ')[0].split(',')[1]);
+    const endPriceY = parseFloat(points.split(' ').slice(-1)[0].split(',')[1]);
+
+
+    return (
+        <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+            <h3 className="text-base font-medium text-gray-700 mb-2 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1 text-gray-500"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                價格走勢
+            </h3>
+            <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} className="w-full h-auto" style={{maxWidth: `${CHART_WIDTH}px`}}>
+                
+                {/* 輔助線 - Y軸 (價格標籤) */}
+                <line x1={PADDING} y1={PADDING} x2={PADDING} y2={CHART_HEIGHT - PADDING} stroke="#ddd" strokeWidth="1" />
+                {/* 輔助線 - X軸 (時間標籤) */}
+                <line x1={PADDING} y1={CHART_HEIGHT - PADDING} x2={CHART_WIDTH - PADDING} y2={CHART_HEIGHT - PADDING} stroke="#ddd" strokeWidth="1" />
+                
+                {/* Y 軸標籤 (Max Price) */}
+                <text x={PADDING - 5} y={PADDING + 5} textAnchor="end" fontSize="10" fill="#666">
+                    ${maxPrice.toFixed(0)}
+                </text>
+
+                {/* Y 軸標籤 (Min Price) */}
+                <text x={PADDING - 5} y={CHART_HEIGHT - PADDING} textAnchor="end" fontSize="10" fill="#666">
+                    ${minPrice.toFixed(0)}
+                </text>
+
+
+                {/* 折線圖 */}
+                <polyline
+                    fill="none"
+                    stroke={theme.color === 'red' ? '#EF4444' : '#4F46E5'} // 使用主題色
+                    strokeWidth="2"
+                    points={points}
+                />
+
+                {/* 數據點 */}
+                {validRecords.map((record, index) => {
+                    const [x, y] = points.split(' ')[index].split(',').map(Number);
+                    return (
+                        <circle 
+                            key={index} 
+                            cx={x} 
+                            cy={y} 
+                            r="3" 
+                            fill={index === 0 ? '#10B981' : theme.primary.split('-')[1]} // 最新點使用綠色
+                            title={`$${record.price}`}
+                        />
+                    );
+                })}
+            </svg>
+            <div className="text-xs text-gray-500 mt-2 flex justify-between px-3">
+                <span>最早紀錄: {new Date(minTimestamp).toLocaleDateString()}</span>
+                <span>最新紀錄: {new Date(maxTimestamp).toLocaleDateString()}</span>
+            </div>
+        </div>
+    );
+}
+
+// 放在 App 組件定義之前
+function PriceHistoryDisplay({ historyRecords, theme }) {
+    if (historyRecords.length === 0) {
+        return (
+            <div className="text-center p-6 text-gray-500 bg-white rounded-xl shadow-md">
+                尚無歷史價格紀錄。
+            </div>
+        );
+    }
+
+    return (
+        <div className={`p-6 rounded-xl shadow-2xl bg-white border-t-4 ${theme.border} mt-8`}>
+            <h2 className={`text-xl font-semibold ${theme.text} mb-4`}>
+                價格紀錄 ({historyRecords.length} 筆)
+            </h2>
+            
+            {/* 放置圖表的位置 (圖表邏輯在下面) */}
+            <div className="mb-6">
+                <PriceTrendChart records={historyRecords} theme={theme} />
+            </div>
+
+            {/* 3. 歷史紀錄清單 */}
+            <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                {historyRecords.map((record, index) => (
+                    <div 
+                        key={index} 
+                        className={`p-3 rounded-lg shadow-sm border border-gray-100 ${index === 0 ? theme.light : 'bg-white'}`}
+                    >
+                        <div className="flex justify-between items-start font-bold">
+                            <span className="text-2xl text-red-600">${record.price.toFixed(2)}</span>
+                            <span className="text-xs text-gray-500">
+                                {new Date(record.timestamp).toLocaleString()}
+                            </span>
+                        </div>
+                        <p className="text-sm text-gray-700 mt-1">
+                            商店: {record.storeName || '未標註'}
+                        </p>
+                        {record.discountDetails && (
+                            <p className="text-xs text-indigo-600 italic">
+                                優惠: {record.discountDetails}
+                            </p>
+                        )}
+                        {/* 標示最新紀錄 */}
+                        {index === 0 && (
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full text-white ${theme.primary}`}>
+                                最新紀錄
+                            </span>
+                        )}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
 
 // -----------------------------------------------------------------------------
 // 2. 主題配置與本地儲存設定 (Theming & Local Setup)
@@ -458,6 +616,9 @@ function App() {
     const [storeName, setStoreName] = useState(''); // 新增商店名稱狀態
     const [ocrResult, setOcrResult] = useState(null); // 新增OCR結果狀態，用於開發者確認
 
+    // 新增歷史紀錄狀態
+    const [productHistory, setProductHistory] = useState([]);
+
     // -----------------------------------------------------------------------------
     // 產品識別邏輯 (Local Storage 版本)
     // -----------------------------------------------------------------------------
@@ -479,6 +640,17 @@ function App() {
         try {
             await new Promise(r => setTimeout(r, 200)); 
             
+            // 1. 獲取所有歷史紀錄
+            const allRecordsJson = localStorage.getItem('MVP_PRICE_RECORDS') || '[]';
+            const allRecords = JSON.parse(allRecordsJson);
+            
+            // 2. 篩選出當前產品的紀錄
+            const filteredRecords = allRecords
+                .filter(r => r.numericalID === numericalID)
+                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // 依時間倒序排列
+
+            setProductHistory(filteredRecords); // <-- 儲存歷史紀錄
+
             const productsJson = localStorage.getItem('MVP_PRODUCTS') || '{}';
             const products = JSON.parse(productsJson);
 
@@ -492,6 +664,7 @@ function App() {
         } catch (error) {
             console.error("查詢產品失敗 (Local Storage):", error);
             setLookupStatus('ready');
+            setProductHistory([]); // 清空歷史紀錄
         }
     }, [ocrResult]);
 
@@ -613,6 +786,13 @@ function App() {
                         : `非最低標價。歷史最低標價為 $${bestDeal.price} (商店: ${bestDeal.storeName})`
                 });
             }
+
+            // 更新歷史紀錄
+            const filteredRecords = allRecords
+                .filter(r => r.numericalID === numericalID)
+                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // 依時間倒序排列
+
+            setProductHistory(filteredRecords);
 
         } catch (error) {
             console.error("儲存或比價失敗 (Local Storage):", error);
@@ -826,6 +1006,14 @@ function App() {
                         </p>
                     </div>
                 </div>
+
+                {/* 歷史價格與走勢圖表顯示區 - 只有當找到產品時才顯示 */}
+                {(lookupStatus === 'found' || lookupStatus === 'new') && barcode && (
+                    <PriceHistoryDisplay 
+                        historyRecords={productHistory} 
+                        theme={currentTheme} 
+                    />
+                )}
             </div>
 
             {/* 主題選擇 Modal */}

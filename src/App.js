@@ -480,6 +480,14 @@ function App() {
 
     // 儲存並比價函數 (Firebase 版本)
     const saveAndComparePrice = useCallback(async (selectedStore) => {
+        console.log("--- saveAndComparePrice triggered ---");
+        console.log("State at start of save:");
+        console.log(`productName: ${productName}`);
+        console.log(`currentPrice: ${currentPrice}`);
+        console.log(`barcode: ${barcode}`);
+        console.log(`storeName: ${storeName}`);
+        console.log(`selectedStore: ${selectedStore}`);
+
         const finalStoreName = selectedStore || storeName;
         const numericalID = djb2Hash(barcode);
         const priceValue = parseFloat(currentPrice);
@@ -500,13 +508,16 @@ function App() {
             const productRef = doc(db, "products", numericalID.toString());
             const productSnap = await getDoc(productRef);
             if (!productSnap.exists()) {
-                await setDoc(productRef, {
+                const newProductData = {
                     numericalID,
                     barcodeData: barcode,
-                    productName,
+                    productName, // This should be the value from the state
                     createdAt: serverTimestamp(),
                     lastUpdatedBy: userId,
-                });
+                };
+                console.log("--- About to write to DB ---");
+                console.log("Data being written for new product:", newProductData);
+                await setDoc(productRef, newProductData);
             }
 
             // 步驟 1: 儲存新的價格紀錄
@@ -526,7 +537,6 @@ function App() {
             const recordsSnap = await getDocs(recordsQuery);
             const records = recordsSnap.docs.map(doc => doc.data());
             
-            // 將剛才新增的紀錄(其 timestamp 為 null)加入比價陣列
             records.push({ ...priceRecord, timestamp: new Date() });
 
             if (records.length <= 1) {
@@ -538,11 +548,12 @@ function App() {
                     isBest: isTrulyBest,
                     bestPrice: bestDeal.price,
                     bestStore: bestDeal.storeName,
-                    message: isTrulyBest ? '恭喜！這是目前紀錄中的最低標價！' : `非最低標價。歷史最低為 $${bestDeal.price} (${bestDeal.storeName})`
+                    message: isTrulyBest ? '恭喜！這是目前紀錄中的最低標價！' : `非最低標價。歷史最低為 ${bestDeal.price} (${bestDeal.storeName})`
                 });
             }
 
             // 步驟 3: 重新載入歷史紀錄
+            console.log("Calling lookupProduct after save...");
             lookupProduct(barcode);
             setStatusMessage("成功儲存紀錄！");
 

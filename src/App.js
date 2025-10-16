@@ -719,8 +719,8 @@ function App() {
         setStatusMessage(`AI 分析成功！產品: ${productName || '?'}, 價格: $${extractedPrice || '?'}, 商店: ${storeName || '?'}, 折扣: ${discountDetails || '無'}`);
     }, [barcode]);
     
-    // 修改儲存並比價函數 (Local Storage 版本)
-    const saveAndComparePrice = useCallback(async (skipStoreCheck = false) => {
+    // 儲存並比價函數 (Local Storage 版本)
+    const saveAndComparePrice = useCallback(async () => {
         const numericalID = djb2Hash(barcode);
         const priceValue = parseFloat(currentPrice);
 
@@ -729,8 +729,8 @@ function App() {
             return;
         }
 
-        // 檢查商店名稱是否為空（除非跳過檢查）
-        if (!storeName.trim() && !skipStoreCheck) {
+        // 檢查商店名稱是否為空
+        if (!storeName.trim()) {
             setIsStoreSelectorOpen(true);
             return;
         }
@@ -811,14 +811,15 @@ function App() {
         }
     }, [userId, barcode, productName, currentPrice, discountDetails, storeName]); 
 
-    // 處理商店選擇
+    // 處理商店選擇並繼續儲存流程
     const handleStoreSelect = useCallback((selectedStore) => {
         setStoreName(selectedStore);
         setIsStoreSelectorOpen(false);
         
-        // 延遲執行儲存操作，確保狀態已更新，並跳過商店檢查
+        // 延遲執行儲存操作，確保狀態已更新
         setTimeout(() => {
-            saveAndComparePrice(true); // 传递 true 以跳過商店檢查
+            // 直接調用保存函數，因為商店名稱已經設置
+            saveAndComparePrice();
         }, 100);
     }, [saveAndComparePrice]);
 

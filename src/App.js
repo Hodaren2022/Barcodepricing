@@ -719,10 +719,7 @@ function App() {
         setStatusMessage(`AI 分析成功！產品: ${productName || '?'}, 價格: $${extractedPrice || '?'}, 商店: ${storeName || '?'}, 折扣: ${discountDetails || '無'}`);
     }, [barcode]);
     
-    // 新增狀態來跟踪是否剛剛選擇了商店
-    const [justSelectedStore, setJustSelectedStore] = useState(false);
-
-    // 儲存並比價函數 (Local Storage 版本)
+        // 儲存並比價函數 (Local Storage 版本)
     const saveAndComparePrice = useCallback(async () => {
         const numericalID = djb2Hash(barcode);
         const priceValue = parseFloat(currentPrice);

@@ -524,6 +524,7 @@ function App() {
         }
 
         // 2. 自動填入產品名稱、價格、商店、折扣
+        // 無論條碼是否存在，都應該更新產品名稱和其他欄位
         setProductName(productName || '');
         setCurrentPrice(extractedPrice || '');
         setStoreName(storeName || '');

@@ -292,7 +292,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
         try {
             const base64Image = capturedImage.split(',')[1]; // 移除 MIME 類型前綴
 
-            const systemPrompt = "你是一位專業的價目標籤和收據分析師。請從提供的影像中提取產品條碼（如果可見）、主要售價、商店名稱以及任何詳細的折扣或促銷資訊。請嚴格以 JSON 格式輸出。";
+            const systemPrompt = "你是一位專業的價目標籤和收據分析師。請從提供的影像中提取產品條碼（如果可見）、產品名稱、主要售價、商店名稱以及任何詳細的折扣或促銷資訊。請嚴格以 JSON 格式輸出。";
             const userPrompt = "分析此產品或價目標籤的影像，並提取所需的結構化資訊。請在 discountDetails 中提供所有相關的促銷訊息，例如買一送一、有效期限等。";
             const apiUrl = `/.netlify/functions/gemini-proxy`;
 
@@ -315,6 +315,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
     const handleSimulatedAnalysis = () => {
         const mockResult = {
             scannedBarcode: '4710123456789',
+            productName: '測試產品名稱',
             extractedPrice: (Math.random() * 50 + 100).toFixed(0).toString(),
             storeName: '模擬超商 (AI)',
             discountDetails: '買二送一優惠 / 限時促銷',
@@ -510,7 +511,7 @@ function App() {
 
     // 處理 AI 分析成功並填入欄位
     const handleAiCaptureSuccess = useCallback((result) => {
-        const { scannedBarcode, extractedPrice, storeName, discountDetails } = result;
+        const { scannedBarcode, productName, extractedPrice, storeName, discountDetails } = result;
         
         // 保存OCR結果供開發者確認
         setOcrResult(result);
@@ -522,12 +523,13 @@ function App() {
              setStatusMessage("AI 未能識別條碼，請手動輸入或確保條碼清晰！");
         }
 
-        // 2. 自動填入價格、商店、折扣
+        // 2. 自動填入產品名稱、價格、商店、折扣
+        setProductName(productName || '');
         setCurrentPrice(extractedPrice || '');
         setStoreName(storeName || '');
         setDiscountDetails(discountDetails || '');
 
-        setStatusMessage(`AI 分析成功！價格: $${extractedPrice || '?'}, 商店: ${storeName || '?'}, 折扣: ${discountDetails || '無'}`);
+        setStatusMessage(`AI 分析成功！產品: ${productName || '?'}, 價格: $${extractedPrice || '?'}, 商店: ${storeName || '?'}, 折扣: ${discountDetails || '無'}`);
     }, [barcode]);
     
     // 儲存並比價函數 (Local Storage 版本)
@@ -672,6 +674,9 @@ function App() {
                         <div className="grid grid-cols-2 gap-2 text-sm">
                             <div className="font-medium text-gray-700">條碼:</div>
                             <div className="text-gray-900">{ocrResult.scannedBarcode || '未識別'}</div>
+                            
+                            <div className="font-medium text-gray-700">產品名稱:</div>
+                            <div className="text-gray-900">{ocrResult.productName || '未識別'}</div>
                             
                             <div className="font-medium text-gray-700">價格:</div>
                             <div className="text-gray-900">${ocrResult.extractedPrice || '未識別'}</div>

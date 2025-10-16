@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { PaintBucket, DollarSign, Barcode, ClipboardCheck, Search, X, Camera, Zap, FileText } from 'lucide-react';
+import { PaintBucket, DollarSign, Barcode, ClipboardCheck, X, Camera, Zap, FileText, RotateCcw } from 'lucide-react';
 
 // -----------------------------------------------------------------------------
 // 1. 核心設定與工具函數 (Core Setup & Utilities)
@@ -183,12 +183,23 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
     const [isCameraOn, setIsCameraOn] = useState(false);
     const [scanError, setScanError] = useState('');
     const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [capturedImage, setCapturedImage] = useState(null); // 新增狀態：儲存擷取的圖片
+    const [capturedImage, setCapturedImage] = useState(null);
 
-    // 取得攝影機畫面
+    const stopCamera = useCallback(() => {
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+        }
+        if (videoRef.current) {
+            videoRef.current.srcObject = null;
+        }
+        setIsCameraOn(false);
+    }, []);
+
     const startCamera = useCallback(async () => {
         setScanError('');
-        setCapturedImage(null); // 清除舊圖片
+        setCapturedImage(null);
+        setIsCameraOn(true); 
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
@@ -202,7 +213,6 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
                 await videoRef.current.play();
-                setIsCameraOn(true);
             }
         } catch (err) {
             console.error("無法存取攝影機:", err);
@@ -211,26 +221,17 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
         }
     }, []);
 
-    // 釋放攝影機資源
-    const stopCamera = useCallback(() => {
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-        }
-        setIsCameraOn(false);
-    }, []);
-
-    // 處理 Modal 開啟/關閉時的生命週期
+    // On mount, start the camera. On unmount, stop it.
     useEffect(() => {
         startCamera();
         return () => {
             stopCamera();
         };
-    }, [startCamera, stopCamera]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
-    // 擷取視訊中央 75% 畫面並轉換為 Base64
     const handleCapture = useCallback(() => {
-        if (!videoRef.current) return;
+        if (!videoRef.current || !videoRef.current.srcObject) return;
 
         const video = videoRef.current;
         const canvas = document.createElement('canvas');
@@ -247,8 +248,9 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
         ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
 
         const base64Data = canvas.toDataURL('image/jpeg', 0.9);
+        
+        stopCamera();
         setCapturedImage(base64Data);
-        stopCamera(); // 擷取後停止攝影機
 
     }, [stopCamera]);
 

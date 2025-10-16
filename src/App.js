@@ -529,6 +529,11 @@ function App() {
         setCurrentPrice(extractedPrice || '');
         setStoreName(storeName || '');
         setDiscountDetails(discountDetails || '');
+        
+        // 更新查詢狀態，避免顯示"產品不存在，請手動輸入"
+        if (productName) {
+            setLookupStatus('found');
+        }
 
         setStatusMessage(`AI 分析成功！產品: ${productName || '?'}, 價格: $${extractedPrice || '?'}, 商店: ${storeName || '?'}, 折扣: ${discountDetails || '無'}`);
     }, [barcode]);

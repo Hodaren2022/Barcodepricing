@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { PaintBucket, DollarSign, Barcode, ClipboardCheck, X, Camera, Zap, FileText, RotateCcw } from 'lucide-react';
+import { PaintBucket, DollarSign, Barcode, ClipboardCheck, X, Camera, Zap, FileText, RotateCcw, Database } from 'lucide-react';
+import AllRecordsPage from './AllRecordsPage';
 
 // -----------------------------------------------------------------------------
 // 1. 核心設定與工具函數 (Core Setup & Utilities)
@@ -611,6 +612,9 @@ function App() {
     const [storeName, setStoreName] = useState(''); // 新增商店名稱狀態
     const [ocrResult, setOcrResult] = useState(null); // 新增OCR結果狀態，用於開發者確認
 
+    // 新增頁面狀態
+    const [currentPage, setCurrentPage] = useState('main'); // 'main' or 'allRecords'
+
     // 新增歷史紀錄狀態
     const [productHistory, setProductHistory] = useState([]);
 
@@ -817,12 +821,21 @@ function App() {
         }
     }, [lookupStatus]);
 
-
     if (!isAuthReady) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-gray-50">
                 <p className="text-xl text-gray-700">正在初始化本地應用程式...</p>
             </div>
+        );
+    }
+
+    // 如果在所有記錄頁面，渲染該頁面
+    if (currentPage === 'allRecords') {
+        return (
+            <AllRecordsPage 
+                theme={currentTheme} 
+                onBack={() => setCurrentPage('main')} 
+            />
         );
     }
 
@@ -835,6 +848,13 @@ function App() {
                         條碼比價神器 (MVP-AI)
                     </h1>
                     <div className="flex items-center space-x-3">
+                        <button 
+                            onClick={() => setCurrentPage('allRecords')}
+                            className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`}
+                            title="查看所有記錄"
+                        >
+                            <Database className="w-5 h-5" />
+                        </button>
                         <button 
                             onClick={() => setIsThemeModalOpen(true)}
                             className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`}

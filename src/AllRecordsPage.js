@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ArrowLeft, Database, TrendingUp } from 'lucide-react';
+import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 
 // 圖表組件
 const CHART_WIDTH = 400;
@@ -7,41 +8,34 @@ const CHART_HEIGHT = 150;
 const PADDING = 20;
 
 function PriceTrendChart({ records, productName }) {
-    // 價格必須是數字，並且時間戳必須存在
-    const validRecords = records.filter(r => !isNaN(r.price) && r.timestamp);
+    const validRecords = records.map(r => ({
+        ...r,
+        timestamp: r.timestamp?.toDate ? r.timestamp.toDate() : new Date(r.timestamp)
+    })).filter(r => !isNaN(r.price) && r.timestamp).sort((a, b) => a.timestamp - b.timestamp);
 
     if (validRecords.length < 2) {
         return <p className="text-center text-sm text-gray-500">至少需要兩筆紀錄才能繪製趨勢圖。</p>;
     }
 
-    // 1. 計算數據範圍
     const prices = validRecords.map(r => r.price);
-    const minPrice = Math.min(...prices) * 0.95; // 讓圖表底部留一點空間
-    const maxPrice = Math.max(...prices) * 1.05; // 讓圖表頂部留一點空間
+    const minPrice = Math.min(...prices) * 0.95;
+    const maxPrice = Math.max(...prices) * 1.05;
     const priceRange = maxPrice - minPrice;
 
-    // 時間軸範圍
-    const minTimestamp = new Date(validRecords[validRecords.length - 1].timestamp).getTime();
-    const maxTimestamp = new Date(validRecords[0].timestamp).getTime();
+    const timestamps = validRecords.map(r => r.timestamp.getTime());
+    const minTimestamp = Math.min(...timestamps);
+    const maxTimestamp = Math.max(...timestamps);
     const timeRange = maxTimestamp - minTimestamp;
-    
-    if (priceRange === 0) {
-        return <p className="text-center text-sm text-gray-500">價格沒有波動，無法繪製趨勢圖。</p>;
+
+    if (priceRange === 0 || timeRange === 0) {
+        return <p className="text-center text-sm text-gray-500">價格或時間無足夠變化可繪圖。</p>;
     }
 
-    // 2. 轉換為 SVG 座標點字串
     const points = validRecords.map(record => {
-        const timestamp = new Date(record.timestamp).getTime();
-        const price = record.price;
-
-        // X 座標：將時間映射到 CHART_WIDTH 範圍
-        const xRatio = (timestamp - minTimestamp) / timeRange;
+        const xRatio = (record.timestamp.getTime() - minTimestamp) / timeRange;
         const x = PADDING + xRatio * (CHART_WIDTH - 2 * PADDING);
-
-        // Y 座標：將價格映射到 CHART_HEIGHT 範圍 (注意：Y 軸在 SVG 中是倒置的)
-        const yRatio = (price - minPrice) / priceRange;
+        const yRatio = (record.price - minPrice) / priceRange;
         const y = CHART_HEIGHT - PADDING - yRatio * (CHART_HEIGHT - 2 * PADDING);
-
         return `${x},${y}`;
     }).join(' ');
 
@@ -52,48 +46,19 @@ function PriceTrendChart({ records, productName }) {
                 價格走勢 - {productName}
             </h3>
             <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} className="w-full h-auto" style={{maxWidth: `${CHART_WIDTH}px`}}>
-                
-                {/* 輔助線 - Y軸 (價格標籤) */}
                 <line x1={PADDING} y1={PADDING} x2={PADDING} y2={CHART_HEIGHT - PADDING} stroke="#ddd" strokeWidth="1" />
-                {/* 輔助線 - X軸 (時間標籤) */}
                 <line x1={PADDING} y1={CHART_HEIGHT - PADDING} x2={CHART_WIDTH - PADDING} y2={CHART_HEIGHT - PADDING} stroke="#ddd" strokeWidth="1" />
-                
-                {/* Y 軸標籤 (Max Price) */}
-                <text x={PADDING - 5} y={PADDING + 5} textAnchor="end" fontSize="10" fill="#666">
-                    ${maxPrice.toFixed(0)}
-                </text>
-
-                {/* Y 軸標籤 (Min Price) */}
-                <text x={PADDING - 5} y={CHART_HEIGHT - PADDING} textAnchor="end" fontSize="10" fill="#666">
-                    ${minPrice.toFixed(0)}
-                </text>
-
-                {/* 折線圖 */}
-                <polyline
-                    fill="none"
-                    stroke="#4F46E5"
-                    strokeWidth="2"
-                    points={points}
-                />
-
-                {/* 數據點 */}
+                <text x={PADDING - 5} y={PADDING + 5} textAnchor="end" fontSize="10" fill="#666">${maxPrice.toFixed(0)}</text>
+                <text x={PADDING - 5} y={CHART_HEIGHT - PADDING} textAnchor="end" fontSize="10" fill="#666">${minPrice.toFixed(0)}</text>
+                <polyline fill="none" stroke="#4F46E5" strokeWidth="2" points={points} />
                 {validRecords.map((record, index) => {
                     const [x, y] = points.split(' ')[index].split(',').map(Number);
-                    return (
-                        <circle 
-                            key={index} 
-                            cx={x} 
-                            cy={y} 
-                            r="3" 
-                            fill={index === 0 ? '#10B981' : '#4F46E5'}
-                            title={`$${record.price} at ${new Date(record.timestamp).toLocaleDateString()}`}
-                        />
-                    );
+                    return <circle key={index} cx={x} cy={y} r="3" fill={index === validRecords.length - 1 ? '#10B981' : '#4F46E5'} title={`$${record.price} at ${record.timestamp.toLocaleDateString()}`} />;
                 })}
             </svg>
             <div className="text-xs text-gray-500 mt-2 flex justify-between px-3">
-                <span>最早紀錄: {new Date(minTimestamp).toLocaleDateString()}</span>
-                <span>最新紀錄: {new Date(maxTimestamp).toLocaleDateString()}</span>
+                <span>{new Date(minTimestamp).toLocaleDateString()}</span>
+                <span>{new Date(maxTimestamp).toLocaleDateString()}</span>
             </div>
         </div>
     );
@@ -101,11 +66,15 @@ function PriceTrendChart({ records, productName }) {
 
 // 產品記錄組件
 function ProductRecord({ product, records, theme }) {
-    // 計算統計信息
-    const latestRecord = records[0];
-    const lowestPrice = Math.min(...records.map(r => r.price));
-    const highestPrice = Math.max(...records.map(r => r.price));
-    const avgPrice = records.reduce((sum, r) => sum + r.price, 0) / records.length;
+    const formattedRecords = records.map(r => ({ ...r, timestamp: r.timestamp?.toDate ? r.timestamp.toDate() : new Date(r.timestamp) })).sort((a, b) => b.timestamp - a.timestamp);
+    
+    const latestRecord = formattedRecords[0];
+    if (!latestRecord) return null; // 如果沒有記錄，則不渲染此組件
+
+    const prices = formattedRecords.map(r => r.price);
+    const lowestPrice = Math.min(...prices);
+    const highestPrice = Math.max(...prices);
+    const avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
 
     return (
         <div className={`p-4 rounded-xl shadow-lg bg-white border-t-4 ${theme.border} mb-6`}>
@@ -117,47 +86,30 @@ function ProductRecord({ product, records, theme }) {
                 </div>
                 <div className="text-right">
                     <p className="text-2xl font-bold text-indigo-600">${latestRecord.price.toFixed(2)}</p>
-                    <p className="text-xs text-gray-500">
-                        {new Date(latestRecord.timestamp).toLocaleDateString()}
-                    </p>
+                    <p className="text-xs text-gray-500">{latestRecord.timestamp.toLocaleDateString()}</p>
                 </div>
             </div>
 
             <div className="grid grid-cols-3 gap-2 my-3 text-center">
-                <div className="bg-green-50 p-2 rounded">
-                    <p className="text-xs text-gray-500">最低價</p>
-                    <p className="font-bold text-green-600">${lowestPrice.toFixed(2)}</p>
-                </div>
-                <div className="bg-blue-50 p-2 rounded">
-                    <p className="text-xs text-gray-500">平均價</p>
-                    <p className="font-bold text-blue-600">${avgPrice.toFixed(2)}</p>
-                </div>
-                <div className="bg-red-50 p-2 rounded">
-                    <p className="text-xs text-gray-500">最高價</p>
-                    <p className="font-bold text-red-600">${highestPrice.toFixed(2)}</p>
-                </div>
+                <div className="bg-green-50 p-2 rounded"><p className="text-xs text-gray-500">最低價</p><p className="font-bold text-green-600">${lowestPrice.toFixed(2)}</p></div>
+                <div className="bg-blue-50 p-2 rounded"><p className="text-xs text-gray-500">平均價</p><p className="font-bold text-blue-600">${avgPrice.toFixed(2)}</p></div>
+                <div className="bg-red-50 p-2 rounded"><p className="text-xs text-gray-500">最高價</p><p className="font-bold text-red-600">${highestPrice.toFixed(2)}</p></div>
             </div>
 
-            <div className="mb-4">
-                <PriceTrendChart records={records} productName={product.productName} />
-            </div>
+            <div className="mb-4"><PriceTrendChart records={formattedRecords} productName={product.productName} /></div>
 
             <div className="mt-4">
                 <h4 className="font-semibold text-gray-700 mb-2">價格記錄詳情</h4>
                 <div className="space-y-2 max-h-40 overflow-y-auto">
-                    {records.map((record, index) => (
+                    {formattedRecords.map((record, index) => (
                         <div key={index} className="flex justify-between items-center p-2 bg-gray-50 rounded">
                             <div>
                                 <p className="font-medium">${record.price.toFixed(2)}</p>
-                                {record.discountDetails && (
-                                    <p className="text-xs text-indigo-600">{record.discountDetails}</p>
-                                )}
+                                {record.discountDetails && <p className="text-xs text-indigo-600">{record.discountDetails}</p>}
                             </div>
                             <div className="text-right">
                                 <p className="text-xs text-gray-500">{record.storeName || '未標註'}</p>
-                                <p className="text-xs text-gray-500">
-                                    {new Date(record.timestamp).toLocaleDateString()}
-                                </p>
+                                <p className="text-xs text-gray-500">{record.timestamp.toLocaleDateString()}</p>
                             </div>
                         </div>
                     ))}
@@ -168,83 +120,83 @@ function ProductRecord({ product, records, theme }) {
 }
 
 // 主組件
-function AllRecordsPage({ theme, onBack }) {
+function AllRecordsPage({ theme, onBack, db }) {
     const [allProducts, setAllProducts] = useState([]);
-    const [allRecords, setAllRecords] = useState([]);
+    const [allRecords, setAllRecords] = useState({});
     const [loading, setLoading] = useState(true);
     const [sortOption, setSortOption] = useState('latest'); // latest, name, price
 
     useEffect(() => {
-        try {
-            // 從 Local Storage 獲取數據
-            const productsJson = localStorage.getItem('MVP_PRODUCTS') || '{}';
-            const recordsJson = localStorage.getItem('MVP_PRICE_RECORDS') || '[]';
+        const fetchData = async () => {
+            if (!db) return;
+            setLoading(true);
+            try {
+                // 1. Fetch all products
+                const productsQuery = query(collection(db, "products"), orderBy("createdAt", "desc"));
+                const productsSnap = await getDocs(productsQuery);
+                const productsArray = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                // 2. Fetch all records
+                const recordsQuery = query(collection(db, "priceRecords"), orderBy("timestamp", "desc"));
+                const recordsSnap = await getDocs(recordsQuery);
+                const recordsArray = recordsSnap.docs.map(doc => doc.data());
+
+                // 3. Group records by product ID
+                const recordsByProduct = {};
+                recordsArray.forEach(record => {
+                    if (!recordsByProduct[record.numericalID]) {
+                        recordsByProduct[record.numericalID] = [];
+                    }
+                    recordsByProduct[record.numericalID].push(record);
+                });
+
+                setAllProducts(productsArray);
+                setAllRecords(recordsByProduct);
+
+            } catch (error) {
+                console.error('讀取 Firestore 數據失敗:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchData();
+    }, [db]);
+
+    const sortedProducts = useMemo(() => {
+        return [...allProducts].sort((a, b) => {
+            const recordsA = allRecords[a.numericalID] || [];
+            const recordsB = allRecords[b.numericalID] || [];
             
-            const products = JSON.parse(productsJson);
-            const records = JSON.parse(recordsJson);
-
-            // 轉換產品對象為數組
-            const productsArray = Object.values(products);
-            
-            // 按 numericalID 將記錄分組
-            const recordsByProduct = {};
-            records.forEach(record => {
-                if (!recordsByProduct[record.numericalID]) {
-                    recordsByProduct[record.numericalID] = [];
-                }
-                recordsByProduct[record.numericalID].push(record);
-            });
-
-            // 排序每個產品的記錄（按時間倒序）
-            Object.keys(recordsByProduct).forEach(productId => {
-                recordsByProduct[productId].sort((a, b) => 
-                    new Date(b.timestamp) - new Date(a.timestamp)
-                );
-            });
-
-            setAllProducts(productsArray);
-            setAllRecords(recordsByProduct);
-            setLoading(false);
-        } catch (error) {
-            console.error('讀取數據失敗:', error);
-            setLoading(false);
-        }
-    }, []);
-
-    // 排序產品
-    const sortedProducts = [...allProducts].sort((a, b) => {
-        switch (sortOption) {
-            case 'name':
+            if (sortOption === 'name') {
                 return a.productName.localeCompare(b.productName);
-            case 'price':
-                const priceA = allRecords[a.numericalID]?.[0]?.price || 0;
-                const priceB = allRecords[b.numericalID]?.[0]?.price || 0;
-                return priceB - priceA; // 降序
-            case 'latest':
-            default:
-                const timeA = allRecords[a.numericalID]?.[0]?.timestamp || '';
-                const timeB = allRecords[b.numericalID]?.[0]?.timestamp || '';
-                return new Date(timeB) - new Date(timeA); // 降序
-        }
-    });
+            }
+            
+            const latestRecordA = recordsA[0];
+            const latestRecordB = recordsB[0];
+
+            if (sortOption === 'price') {
+                const priceA = latestRecordA?.price || -1;
+                const priceB = latestRecordB?.price || -1;
+                return priceB - priceA;
+            }
+
+            // Default to 'latest'
+            const timeA = latestRecordA?.timestamp?.toDate ? latestRecordA.timestamp.toDate().getTime() : 0;
+            const timeB = latestRecordB?.timestamp?.toDate ? latestRecordB.timestamp.toDate().getTime() : 0;
+            return timeB - timeA;
+        });
+    }, [allProducts, allRecords, sortOption]);
 
     if (loading) {
         return (
             <div className="min-h-screen p-4 sm:p-8 bg-gray-100">
                 <div className="max-w-4xl mx-auto">
                     <div className="flex items-center mb-6">
-                        <button 
-                            onClick={onBack}
-                            className="flex items-center text-indigo-600 hover:text-indigo-800 mr-4"
-                        >
-                            <ArrowLeft className="mr-1" size={20} />
-                            返回
-                        </button>
+                        <button onClick={onBack} className="flex items-center text-indigo-600 hover:text-indigo-800 mr-4"><ArrowLeft className="mr-1" size={20} />返回</button>
                         <h1 className="text-2xl font-bold text-gray-800">所有記錄</h1>
                     </div>
-                    <div className="text-center py-10">
-                        <p>正在加載數據...</p>
-                    </div>
+                    <div className="text-center py-10"><p>正在從雲端加載數據...</p></div>
                 </div>
             </div>
         );
@@ -255,28 +207,15 @@ function AllRecordsPage({ theme, onBack }) {
             <div className="max-w-4xl mx-auto">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6">
                     <div className="flex items-center mb-4 sm:mb-0">
-                        <button 
-                            onClick={onBack}
-                            className="flex items-center text-indigo-600 hover:text-indigo-800 mr-4"
-                        >
-                            <ArrowLeft className="mr-1" size={20} />
-                            返回
-                        </button>
-                        <h1 className="text-2xl font-bold text-gray-800 flex items-center">
-                            <Database className="mr-2" />
-                            所有記錄
-                        </h1>
+                        <button onClick={onBack} className="flex items-center text-indigo-600 hover:text-indigo-800 mr-4"><ArrowLeft className="mr-1" size={20} />返回</button>
+                        <h1 className="text-2xl font-bold text-gray-800 flex items-center"><Database className="mr-2" />所有記錄</h1>
                     </div>
                     <div className="flex items-center">
                         <label className="mr-2 text-gray-700">排序:</label>
-                        <select 
-                            value={sortOption}
-                            onChange={(e) => setSortOption(e.target.value)}
-                            className="border border-gray-300 rounded p-2"
-                        >
+                        <select value={sortOption} onChange={(e) => setSortOption(e.target.value)} className="border border-gray-300 rounded p-2">
                             <option value="latest">最新記錄</option>
                             <option value="name">產品名稱</option>
-                            <option value="price">價格</option>
+                            <option value="price">最新價格</option>
                         </select>
                     </div>
                 </div>
@@ -291,25 +230,14 @@ function AllRecordsPage({ theme, onBack }) {
                     <div>
                         <div className="mb-4 p-4 bg-white rounded-lg shadow">
                             <div className="flex justify-between">
-                                <p className="text-gray-700">
-                                    總共 <span className="font-bold">{sortedProducts.length}</span> 個產品
-                                </p>
-                                <p className="text-gray-700">
-                                    總共 <span className="font-bold">{Object.values(allRecords).flat().length}</span> 條記錄
-                                </p>
+                                <p className="text-gray-700">總共 <span className="font-bold">{sortedProducts.length}</span> 個產品</p>
+                                <p className="text-gray-700">總共 <span className="font-bold">{Object.values(allRecords).flat().length}</span> 條記錄</p>
                             </div>
                         </div>
-                        
                         {sortedProducts.map(product => {
                             const records = allRecords[product.numericalID] || [];
-                            return (
-                                <ProductRecord 
-                                    key={product.numericalID} 
-                                    product={product} 
-                                    records={records} 
-                                    theme={theme}
-                                />
-                            );
+                            if (records.length === 0) return null;
+                            return <ProductRecord key={product.numericalID} product={product} records={records} theme={theme} />;
                         })}
                     </div>
                 )}

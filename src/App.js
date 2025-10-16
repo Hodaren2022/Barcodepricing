@@ -747,7 +747,7 @@ function App() {
                             placeholder={productNamePlaceholder}
                             className={`w-full p-3 border border-gray-300 rounded-lg transition 
                                 ${lookupStatus === 'found' ? 'bg-green-50' : lookupStatus === 'new' ? 'bg-yellow-50' : ''}`}
-                            readOnly={lookupStatus === 'found'} 
+                            readOnly={lookupStatus === 'found' && !ocrResult} 
                         />
                         <p className="text-sm text-gray-500 mt-1">
                             數值 ID (Hash): {barcode ? djb2Hash(barcode) : '尚未計算'}

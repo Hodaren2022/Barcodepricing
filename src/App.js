@@ -569,9 +569,7 @@ function App() {
     const handleStoreSelect = useCallback((selectedStore) => {
         setStoreName(selectedStore);
         setIsStoreSelectorOpen(false);
-        // 使用 setTimeout 確保狀態已更新
-        setTimeout(() => saveAndComparePrice(selectedStore), 100);
-    }, [saveAndComparePrice]);
+    }, []);
 
     const themePrimary = currentTheme.primary;
     const themeText = currentTheme.text;

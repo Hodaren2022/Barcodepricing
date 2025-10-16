@@ -468,6 +468,11 @@ function App() {
             return;
         }
 
+        // 如果有AI辨識結果，則不執行本地查詢
+        if (ocrResult) {
+            return;
+        }
+
         setLookupStatus('searching');
         const numericalID = djb2Hash(barcodeData);
         
@@ -488,7 +493,7 @@ function App() {
             console.error("查詢產品失敗 (Local Storage):", error);
             setLookupStatus('ready');
         }
-    }, []);
+    }, [ocrResult]);
 
     useEffect(() => {
         if (barcode.length > 0 && isAuthReady) {

@@ -719,6 +719,9 @@ function App() {
         setStatusMessage(`AI 分析成功！產品: ${productName || '?'}, 價格: $${extractedPrice || '?'}, 商店: ${storeName || '?'}, 折扣: ${discountDetails || '無'}`);
     }, [barcode]);
     
+    // 新增狀態來跟踪是否剛剛選擇了商店
+    const [justSelectedStore, setJustSelectedStore] = useState(false);
+
     // 儲存並比價函數 (Local Storage 版本)
     const saveAndComparePrice = useCallback(async () => {
         const numericalID = djb2Hash(barcode);
@@ -816,12 +819,95 @@ function App() {
         setStoreName(selectedStore);
         setIsStoreSelectorOpen(false);
         
-        // 延遲執行儲存操作，確保狀態已更新
-        setTimeout(() => {
-            // 直接調用保存函數，因為商店名稱已經設置
-            saveAndComparePrice();
-        }, 100);
-    }, [saveAndComparePrice]);
+        // 創建一個新的函數來執行保存，避免依賴於狀態更新
+        const performSave = async () => {
+            const numericalID = djb2Hash(barcode);
+            const priceValue = parseFloat(currentPrice);
+
+            if (!userId || !barcode || !productName || isNaN(priceValue)) {
+                setStatusMessage("請確保已輸入條碼、產品名稱和有效價格！");
+                return;
+            }
+
+            setIsLoading(true);
+            
+            try {
+                // 從 Local Storage 獲取數據
+                const productsJson = localStorage.getItem('MVP_PRODUCTS') || '{}';
+                const allRecordsJson = localStorage.getItem('MVP_PRICE_RECORDS') || '[]';
+                let products = JSON.parse(productsJson);
+                let allRecords = JSON.parse(allRecordsJson);
+
+                // 0. 檢查並創建產品主檔 (如果不存在)
+                if (!products[numericalID]) {
+                    products[numericalID] = {
+                        numericalID,
+                        barcodeData: barcode,
+                        productName,
+                        createdAt: new Date().toISOString(),
+                    };
+                    localStorage.setItem('MVP_PRODUCTS', JSON.stringify(products));
+                }
+                
+                // 1. 儲存新的價格紀錄
+                const priceRecord = {
+                    numericalID,
+                    productName,
+                    storeName: selectedStore || "手動輸入",
+                    price: priceValue,
+                    discountDetails: discountDetails, 
+                    timestamp: new Date().toISOString(),
+                    recordedBy: userId,
+                };
+                
+                allRecords.push(priceRecord);
+                localStorage.setItem('MVP_PRICE_RECORDS', JSON.stringify(allRecords));
+                
+                // 2. 執行比價邏輯 - 查詢該產品所有歷史紀錄
+                const records = allRecords.filter(r => r.numericalID === numericalID);
+
+                if (records.length <= 1) { 
+                    setComparisonResult({ 
+                        isBest: true, 
+                        bestPrice: priceValue,
+                        bestStore: selectedStore || "手動輸入",
+                        message: '這是第一筆紀錄！' 
+                    });
+                } else {
+                    const bestDeal = records.reduce((best, cur) => cur.price < best.price ? cur : best);
+                    const isCurrentBest = priceRecord.price <= bestDeal.price;
+                    
+                    // 比較邏輯：標價最低優先；標價相同則有折扣優先
+                    const isTrulyBest = isCurrentBest && (priceRecord.price < bestDeal.price || (priceRecord.price === bestDeal.price && priceRecord.discountDetails !== ''));
+                    
+                    setComparisonResult({
+                        isBest: isTrulyBest,
+                        bestPrice: bestDeal.price,
+                        bestStore: bestDeal.storeName,
+                        message: isTrulyBest 
+                            ? '恭喜！這是目前紀錄中的最低標價 (或具備折扣)！' 
+                            : `非最低標價。歷史最低標價為 $${bestDeal.price} (商店: ${bestDeal.storeName})`
+                    });
+                }
+
+                // 更新歷史紀錄
+                const filteredRecords = allRecords
+                    .filter(r => r.numericalID === numericalID)
+                    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // 依時間倒序排列
+
+                setProductHistory(filteredRecords);
+
+            } catch (error) {
+                console.error("儲存或比價失敗 (Local Storage):", error);
+                setStatusMessage("數據操作失敗，請檢查瀏覽器設定或本地儲存空間。");
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        
+        // 延遲執行儲存操作
+        setTimeout(performSave, 100);
+    }, [userId, barcode, productName, currentPrice, discountDetails]);
 
     // 主題變數，用於動態 Tailwind 類別
     const themePrimary = currentTheme.primary;

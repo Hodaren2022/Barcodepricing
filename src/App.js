@@ -455,6 +455,7 @@ function App() {
     const [lookupStatus, setLookupStatus] = useState('ready'); 
     const [statusMessage, setStatusMessage] = useState(''); 
     const [storeName, setStoreName] = useState(''); // 新增商店名稱狀態
+    const [ocrResult, setOcrResult] = useState(null); // 新增OCR結果狀態，用於開發者確認
 
     // -----------------------------------------------------------------------------
     // 產品識別邏輯 (Local Storage 版本)
@@ -510,6 +511,9 @@ function App() {
     // 處理 AI 分析成功並填入欄位
     const handleAiCaptureSuccess = useCallback((result) => {
         const { scannedBarcode, extractedPrice, storeName, discountDetails } = result;
+        
+        // 保存OCR結果供開發者確認
+        setOcrResult(result);
         
         // 1. 自動填入條碼
         if (scannedBarcode && scannedBarcode.length > 5) {
@@ -658,6 +662,32 @@ function App() {
                 {statusMessage && (
                     <div className="bg-red-500 text-white p-3 rounded-lg shadow-md mb-4 text-center font-medium transition-opacity duration-300">
                         {statusMessage}
+                    </div>
+                )}
+
+                {/* 開發者確認區塊 - 顯示AI辨識結果 */}
+                {ocrResult && (
+                    <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-4 mb-6">
+                        <h3 className="text-lg font-semibold text-yellow-800 mb-2">AI 辨識結果 (開發者確認區)</h3>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                            <div className="font-medium text-gray-700">條碼:</div>
+                            <div className="text-gray-900">{ocrResult.scannedBarcode || '未識別'}</div>
+                            
+                            <div className="font-medium text-gray-700">價格:</div>
+                            <div className="text-gray-900">${ocrResult.extractedPrice || '未識別'}</div>
+                            
+                            <div className="font-medium text-gray-700">商店:</div>
+                            <div className="text-gray-900">{ocrResult.storeName || '未識別'}</div>
+                            
+                            <div className="font-medium text-gray-700">折扣:</div>
+                            <div className="text-gray-900">{ocrResult.discountDetails || '無'}</div>
+                        </div>
+                        <button 
+                            onClick={() => setOcrResult(null)}
+                            className="mt-3 px-3 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 text-sm"
+                        >
+                            關閉此區塊
+                        </button>
                     </div>
                 )}
 

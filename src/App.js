@@ -113,11 +113,6 @@ function PriceTrendChart({ records, theme }) {
         return `${x},${y}`;
     }).join(' ');
 
-    // 取得第一個和最後一個點的 Y 座標，用於繪製趨勢線
-    const startPriceY = parseFloat(points.split(' ')[0].split(',')[1]);
-    const endPriceY = parseFloat(points.split(' ').slice(-1)[0].split(',')[1]);
-
-
     return (
         <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
             <h3 className="text-base font-medium text-gray-700 mb-2 flex items-center">

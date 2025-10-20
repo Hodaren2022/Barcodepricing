@@ -487,7 +487,7 @@ function AllRecordsPage({ theme, onBack, db }) {
                 )}
 
                 {/* --- START: Revamped Search Component --- */}
-                <div className="fixed bottom-6 right-6 z-30">
+                <div className="fixed top-24 right-6 z-30">
                     <div 
                         className={`flex items-center justify-end bg-white rounded-full shadow-xl transition-all duration-300 ease-in-out overflow-hidden ${isSearchOpen ? 'w-80' : 'w-16 h-16'}`}
                     >

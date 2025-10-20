@@ -222,22 +222,17 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [capturedImage, setCapturedImage] = useState(null);
 
-    const resetState = useCallback(() => {
-        setScanError('');
-        setCapturedImage(null);
-        setIsAnalyzing(false);
-    }, []);
-
     useEffect(() => {
-        resetState();
-        if (stream && videoRef.current) {
+        // This effect handles starting the video stream when the modal opens
+        // or when the user clicks "Retake".
+        if (stream && videoRef.current && !capturedImage) {
             videoRef.current.srcObject = stream;
             videoRef.current.play().catch(err => {
                 console.error("Video play failed:", err);
                 setScanError("無法播放相機影像。");
             });
         }
-    }, [stream, resetState]);
+    }, [stream, capturedImage]); // Re-run when stream is available or image is cleared
 
     const handleCapture = useCallback(() => {
         if (!videoRef.current || !videoRef.current.srcObject) return;
@@ -255,19 +250,18 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
         const base64Data = canvas.toDataURL('image/jpeg', 0.9);
         setCapturedImage(base64Data);
         
-        // Stop video playback after capture
+        // Pause video playback after capture, but don't stop the stream
         if (videoRef.current) {
             videoRef.current.pause();
         }
     }, []);
 
     const handleRetake = useCallback(() => {
-        resetState();
-        if (videoRef.current && stream) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.play().catch(err => console.error("Video play failed:", err));
-        }
-    }, [resetState, stream]);
+        // Simply clear the captured image. The useEffect will handle restarting the video.
+        setCapturedImage(null);
+        setScanError('');
+        setIsAnalyzing(false);
+    }, []);
 
     const handleAnalyze = useCallback(async () => {
         if (!capturedImage) { setScanError("沒有可分析的影像。"); return; }
@@ -570,28 +564,31 @@ function App() {
     }, []);
 
     const stopCameraStream = useCallback(() => {
+        console.log("stopCameraStream: Attempting to stop camera.");
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => track.stop());
             streamRef.current = null;
-            console.log("Camera stream stopped.");
+            console.log("stopCameraStream: Camera stream stopped.");
         }
     }, []);
 
     useEffect(() => {
         // Add a cleanup function to stop the camera when the component unmounts
         return () => {
+            console.log("useEffect cleanup: Running camera cleanup.");
             stopCameraStream();
         };
     }, [stopCameraStream]);
 
     const startCameraStream = async () => {
+        console.log("startCameraStream: Attempting to start camera.");
         if (streamRef.current) {
             return streamRef.current;
         }
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } });
             streamRef.current = stream;
-            console.log("Camera stream started.");
+            console.log("startCameraStream: Camera started successfully.");
             return stream;
         } catch (err) {
             console.error("無法存取攝影機:", err);
@@ -780,6 +777,11 @@ function App() {
         saveAndComparePrice(selectedStore);
     }, [saveAndComparePrice]);
 
+    const handleCaptureModalClose = useCallback(() => {
+        setIsCaptureModalOpen(false);
+        stopCameraStream();
+    }, [stopCameraStream]);
+
     const handleNewScanClick = async () => {
         clearForm();
         const stream = await startCameraStream();
@@ -916,7 +918,7 @@ function App() {
             </div>
 
             {isThemeModalOpen && <ThemeSelector theme={currentTheme} saveTheme={saveUserTheme} onClose={() => setIsThemeModalOpen(false)} />}
-            {isCaptureModalOpen && <AIOcrCaptureModal theme={currentTheme} onAnalysisSuccess={handleAiCaptureSuccess} onClose={() => setIsCaptureModalOpen(false)} stream={streamRef.current} />}
+            {isCaptureModalOpen && <AIOcrCaptureModal theme={currentTheme} onAnalysisSuccess={handleAiCaptureSuccess} onClose={handleCaptureModalClose} stream={streamRef.current} />}
             {isStoreSelectorOpen && <StoreSelector theme={currentTheme} onSelect={handleStoreSelect} onClose={() => setIsStoreSelectorOpen(false)} />}
         </div>
     );

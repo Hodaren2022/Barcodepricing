@@ -311,7 +311,7 @@ function AllRecordsPage({ theme, onBack, db }) {
 
     useEffect(() => {
         if (isSearchOpen && searchInputRef.current) {
-            setTimeout(() => searchInputRef.current.focus(), 300); // Delay for transition
+            setTimeout(() => searchInputRef.current.focus(), 100); // Shorter delay for responsiveness
         }
     }, [isSearchOpen]);
 
@@ -323,45 +323,43 @@ function AllRecordsPage({ theme, onBack, db }) {
     }, [loading, isAfterDelete]);
 
     const filteredProducts = useMemo(() => {
-        let products = [...allProducts];
+        if (searchQuery.trim() === '') {
+            // No search query, just sort the products
+            return [...allProducts].sort((a, b) => {
+                const recordsA = allRecords[a.numericalID] || [];
+                const recordsB = allRecords[b.numericalID] || [];
+                
+                if (sortOption === 'name') {
+                    return a.productName.localeCompare(b.productName);
+                }
+                
+                const latestRecordA = recordsA[0];
+                const latestRecordB = recordsB[0];
 
-        if (searchQuery) {
-            const scoredProducts = products
-                .map(product => ({
-                    product,
-                    score: fuzzyMatch(searchQuery, product.productName)
-                }))
-                .filter(item => item.score > 0)
-                .sort((a, b) => b.score - a.score);
-            
-            return scoredProducts.map(item => item.product);
+                if (sortOption === 'price') {
+                    const priceA = latestRecordA?.price || -1;
+                    const priceB = latestRecordB?.price || -1;
+                    return priceB - priceA;
+                }
+
+                // Default to 'latest'
+                const timeA = latestRecordA?.timestamp?.toDate ? latestRecordA.timestamp.toDate().getTime() : 0;
+                const timeB = latestRecordB?.timestamp?.toDate ? latestRecordB.timestamp.toDate().getTime() : 0;
+                return timeB - timeA;
+            });
         }
+
+        // Fuzzy search logic
+        const scoredProducts = allProducts
+            .map(product => ({
+                product,
+                score: fuzzyMatch(searchQuery, product.productName)
+            }))
+            .filter(item => item.score > 0)
+            .sort((a, b) => b.score - a.score);
         
-        // If no search query, sort as usual
-        products.sort((a, b) => {
-            const recordsA = allRecords[a.numericalID] || [];
-            const recordsB = allRecords[b.numericalID] || [];
-            
-            if (sortOption === 'name') {
-                return a.productName.localeCompare(b.productName);
-            }
-            
-            const latestRecordA = recordsA[0];
-            const latestRecordB = recordsB[0];
+        return scoredProducts.map(item => item.product);
 
-            if (sortOption === 'price') {
-                const priceA = latestRecordA?.price || -1;
-                const priceB = latestRecordB?.price || -1;
-                return priceB - priceA;
-            }
-
-            // Default to 'latest'
-            const timeA = latestRecordA?.timestamp?.toDate ? latestRecordA.timestamp.toDate().getTime() : 0;
-            const timeB = latestRecordB?.timestamp?.toDate ? latestRecordB.timestamp.toDate().getTime() : 0;
-            return timeB - timeA;
-        });
-
-        return products;
     }, [allProducts, allRecords, sortOption, searchQuery]);
 
     const showSuccessMessage = (message) => {
@@ -433,7 +431,7 @@ function AllRecordsPage({ theme, onBack, db }) {
 
     return (
         <div className="min-h-screen p-4 sm:p-8 bg-gray-100">
-            <div className="max-w-4xl mx-auto pb-28"> {/* Added pb-20 for floating button */}
+            <div className="max-w-4xl mx-auto pb-28"> {/* Added pb-28 for floating button */}
                 <SuccessMessage message={successMessage} />
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6">
                     <div className="flex items-center mb-4 sm:mb-0">
@@ -488,9 +486,11 @@ function AllRecordsPage({ theme, onBack, db }) {
                     />
                 )}
 
-                <div className="fixed bottom-6 right-6 z-30 flex items-center justify-end">
-                    <div className={`relative flex items-center justify-end transition-all duration-300 ease-in-out ${isSearchOpen ? 'w-80' : 'w-16'}`}>
-                        <div className={`absolute inset-0 bg-white rounded-full shadow-lg transition-all duration-300 ease-in-out ${isSearchOpen ? 'opacity-100' : 'opacity-0'}`}></div>
+                {/* --- START: Revamped Search Component --- */}
+                <div className="fixed bottom-6 right-6 z-30">
+                    <div 
+                        className={`flex items-center justify-end bg-white rounded-full shadow-xl transition-all duration-300 ease-in-out overflow-hidden ${isSearchOpen ? 'w-80' : 'w-16 h-16'}`}
+                    >
                         <Search className={`absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 transition-opacity duration-200 ${isSearchOpen ? 'opacity-100' : 'opacity-0'}`} size={22} />
                         <input
                             ref={searchInputRef}
@@ -498,18 +498,19 @@ function AllRecordsPage({ theme, onBack, db }) {
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="輸入品名進行模糊搜尋..."
-                            className={`w-full h-16 pl-14 pr-20 bg-transparent border-none rounded-full outline-none text-lg transition-opacity duration-200 ${isSearchOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+                            className={`w-full h-16 pl-14 pr-20 bg-transparent border-none rounded-full outline-none text-lg transition-opacity duration-200 ${isSearchOpen ? 'opacity-100' : 'opacity-0'}`}
+                            style={{pointerEvents: isSearchOpen ? 'auto' : 'none'}}
                         />
-        
                         <button
                             onClick={handleSearchToggle}
-                            className="absolute right-0 top-0 w-16 h-16 bg-indigo-600 text-white rounded-full shadow-xl hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-300 flex items-center justify-center z-10"
+                            className="absolute right-0 top-0 w-16 h-16 bg-indigo-600 text-white rounded-full shadow-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-300 flex items-center justify-center"
                             aria-label={isSearchOpen ? "關閉搜尋" : "開啟搜尋"}
                         >
                             {isSearchOpen ? <X size={28} /> : <Search size={28} />}
                         </button>
                     </div>
                 </div>
+                {/* --- END: Revamped Search Component --- */}
             </div>
         </div>
     );

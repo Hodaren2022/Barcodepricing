@@ -1,4 +1,3 @@
-
 // 使用 ES 模組語法，Netlify Functions 支援
 import fetch from 'node-fetch';
 
@@ -16,7 +15,7 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    // 從前端請求中解析出資料
+    // 從前端請求中解析出資料，包含 responseSchema
     const { systemPrompt, userPrompt, base64Image, responseSchema } = JSON.parse(event.body);
 
     // 驗證收到的資料
@@ -48,6 +47,7 @@ exports.handler = async (event, context) => {
       generationConfig: {
         temperature: 0.1,
         responseMimeType: "application/json",
+        // 使用從前端傳來的 responseSchema
         responseSchema: responseSchema
       }
     };

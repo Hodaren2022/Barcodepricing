@@ -75,6 +75,18 @@ const withExponentialBackoff = async (fn, retries = 5, delay = 1000) => {
     }
 };
 
+function getCleanProductName(name) {
+    if (!name) return '';
+    // This regex removes common quantity/unit specifiers to group similar products.
+    // e.g., "Brand Milk 1L" and "Brand Milk 2L" would both be grouped under "Brand Milk".
+    return name
+        .replace(/[\d.]+ *(g|ml|l|kg|cc|oz|入|支|條|包|個|顆|片|罐|瓶)/ig, '') // e.g., 500g, 10入, 1L
+        .replace(/\s*\d+\s*號/g, '') // e.g., 3號, 4號 (for batteries)
+        .replace(/(家庭號|分享包|補充包|隨身包)/g, '') // Common pack size descriptions
+        .replace(/[()（）[\]【】]/g, '') // Remove brackets
+        .trim();
+}
+
 
 // ----------------------------------------------------------------------------
 // 2. UI 元件 (UI Components)
@@ -217,28 +229,48 @@ function ThemeSelector({ theme, saveTheme, onClose }) {
     );
 }
 
-function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
+function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
     const videoRef = useRef(null);
+    const streamRef = useRef(null);
     const [scanError, setScanError] = useState('');
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [capturedImage, setCapturedImage] = useState(null);
+
+    useEffect(() => {
+        const getCameraStream = async () => {
+            try {
+                const mediaStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+                });
+                streamRef.current = mediaStream;
+                if (videoRef.current) {
+                    videoRef.current.srcObject = mediaStream;
+                    videoRef.current.play().catch(err => {
+                        console.error("Video play failed:", err);
+                        setScanError("無法播放相機影像。");
+                    });
+                }
+            } catch (err) {
+                console.error("無法存取攝影機:", err);
+                setScanError(`無法存取攝影機: ${err.name}. 請檢查權限設定。`);
+            }
+        };
+
+        getCameraStream();
+
+        return () => {
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => track.stop());
+                console.log("Camera stream stopped on modal close.");
+            }
+        };
+    }, []);
 
     const resetState = useCallback(() => {
         setScanError('');
         setCapturedImage(null);
         setIsAnalyzing(false);
     }, []);
-
-    useEffect(() => {
-        resetState();
-        if (stream && videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.play().catch(err => {
-                console.error("Video play failed:", err);
-                setScanError("無法播放相機影像。");
-            });
-        }
-    }, [stream, resetState]);
 
     const handleCapture = useCallback(() => {
         if (!videoRef.current || !videoRef.current.srcObject) return;
@@ -264,11 +296,11 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
 
     const handleRetake = useCallback(() => {
         resetState();
-        if (videoRef.current && stream) {
-            videoRef.current.srcObject = stream;
+        if (videoRef.current && streamRef.current) {
+            videoRef.current.srcObject = streamRef.current;
             videoRef.current.play().catch(err => console.error("Video play failed:", err));
         }
-    }, [resetState, stream]);
+    }, [resetState]);
 
     const handleAnalyze = useCallback(async () => {
         if (!capturedImage) { setScanError("沒有可分析的影像。"); return; }
@@ -513,7 +545,6 @@ function SaveResultToast({ result, onClose }) {
 
 function App() {
     const { userId, isAuthReady, currentTheme, saveUserTheme } = useFirebaseAuthentication();
-    const streamRef = useRef(null);
     
     const [saveResultToast, setSaveResultToast] = useState(null);
 
@@ -569,37 +600,6 @@ function App() {
         setOcrResult(null);
         setLookupStatus('ready');
     }, []);
-
-    const stopCameraStream = useCallback(() => {
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-            console.log("Camera stream stopped.");
-        }
-    }, []);
-
-    useEffect(() => {
-        // Add a cleanup function to stop the camera when the component unmounts
-        return () => {
-            stopCameraStream();
-        };
-    }, [stopCameraStream]);
-
-    const startCameraStream = async () => {
-        if (streamRef.current) {
-            return streamRef.current;
-        }
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } });
-            streamRef.current = stream;
-            console.log("Camera stream started.");
-            return stream;
-        } catch (err) {
-            console.error("無法存取攝影機:", err);
-            setStatusMessage(`無法存取攝影機: ${err.name}`);
-            return null;
-        }
-    };
 
     const lookupProduct = useCallback(async (barcodeData) => {
         if (!barcodeData || barcodeData.length < 5) {
@@ -686,11 +686,11 @@ function App() {
 
     const saveAndComparePrice = useCallback(async (selectedStore) => {
         const finalStoreName = selectedStore || storeName;
-        const numericalID = djb2Hash(barcode);
         const priceValue = parseFloat(currentPrice);
 
-        if (!userId || !barcode || !productName || isNaN(priceValue) || isNaN(parseFloat(quantity)) || parseFloat(quantity) <= 0 || unitPrice === null) {
-            setSaveResultToast({ status: 'error', message: '請確保已輸入條碼、產品名稱、有效總價、數量和單位！', productName: productName || "未知產品" });
+        // 1. 主要驗證：確保核心資訊存在
+        if (!userId || !productName.trim() || isNaN(priceValue) || isNaN(parseFloat(quantity)) || parseFloat(quantity) <= 0 || unitPrice === null) {
+            setSaveResultToast({ status: 'error', message: '請確保已輸入產品名稱、有效總價、數量和單位！', productName: productName || "未知產品" });
             return;
         }
         if (!finalStoreName.trim()) {
@@ -699,34 +699,50 @@ function App() {
         }
 
         setIsLoading(true);
-        
+
+        // 2. 決定產品分組的依據 (Grouping Key)
+        // 優先使用條碼，若無條碼，則使用去除數量詞的產品名稱
+        const cleanName = getCleanProductName(productName);
+        const groupingKey = barcode.trim() || cleanName;
+
+        if (!groupingKey) {
+            setSaveResultToast({ status: 'error', message: '無法建立產品分類，請檢查產品名稱！', productName: productName });
+            setIsLoading(false);
+            return;
+        }
+        const numericalID = djb2Hash(groupingKey);
+
         try {
+            // 3. 建立或更新產品主資料 (products collection)
             const productRef = doc(db, "products", numericalID.toString());
             const productSnap = await getDoc(productRef);
             if (!productSnap.exists()) {
                 await setDoc(productRef, {
                     numericalID,
-                    barcodeData: barcode,
-                    productName,
+                    groupingKey: groupingKey, // 用於分組的關鍵字
+                    barcodeData: barcode.trim(), // 實際條碼
+                    productName: productName.trim(), // 完整產品名稱
                     createdAt: serverTimestamp(),
                     lastUpdatedBy: userId,
                 });
             }
 
+            // 4. 新增價格紀錄 (priceRecords collection)
             const priceRecord = {
-                numericalID,
-                productName,
+                numericalID, // 關聯到產品分組
+                productName: productName.trim(),
                 storeName: finalStoreName,
-                price: priceValue, // 總價
+                price: priceValue,
                 quantity: parseFloat(quantity),
                 unitType: unitType,
-                unitPrice: unitPrice, // 單價
+                unitPrice: unitPrice,
                 discountDetails: discountDetails || '',
                 timestamp: serverTimestamp(),
                 recordedBy: userId,
             };
             await addDoc(collection(db, "priceRecords"), priceRecord);
-            
+
+            // 5. 查詢所有相關紀錄進行比價
             const recordsQuery = query(collection(db, "priceRecords"), where("numericalID", "==", numericalID));
             const recordsSnap = await getDocs(recordsQuery);
             const records = recordsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -740,9 +756,8 @@ function App() {
                 bestPrice = unitPrice;
                 bestStore = finalStoreName;
                 toastStatus = 'success';
-                toastMessage = '這是第一筆紀錄，成功建立！';
+                toastMessage = '這是此產品的第一筆紀錄，成功建立！';
             } else {
-                // 確保 unitPrice 存在且為數字，否則使用 Infinity 進行比較
                 const bestDeal = allRecordsForCompare.reduce((best, cur) => {
                     const curUnitPrice = cur.unitPrice !== undefined && cur.unitPrice !== null ? cur.unitPrice : Infinity;
                     const bestUnitPrice = best.unitPrice !== undefined && best.unitPrice !== null ? best.unitPrice : Infinity;
@@ -755,16 +770,16 @@ function App() {
                 
                 if (isBest) {
                     toastStatus = 'success';
-                    toastMessage = '恭喜！這是目前紀錄中的最低標價！';
+                    toastMessage = '恭喜！這是目前紀錄中的最低單價！';
                 } else {
-                    toastStatus = 'warning';
-                    toastMessage = `非最低標價。歷史最低單價為 $${(bestDeal.unitPrice || 0).toFixed(2)} (${bestDeal.storeName})`;
+                    toastMessage = `非最低單價。歷史最低單價為 ${(bestDeal.unitPrice || 0).toFixed(2)} (${bestDeal.storeName})`;
                 }
             }
 
             setComparisonResult({ isBest, bestPrice, bestStore, message: toastMessage });
             setSaveResultToast({ status: toastStatus, message: toastMessage, productName: productName });
             
+            // 重新觸發查詢以更新歷史紀錄
             lookupProduct(barcode);
 
         } catch (error) {
@@ -783,10 +798,7 @@ function App() {
 
     const handleNewScanClick = async () => {
         clearForm();
-        const stream = await startCameraStream();
-        if (stream) {
-            setIsCaptureModalOpen(true);
-        }
+        setIsCaptureModalOpen(true);
     };
 
     const themePrimary = currentTheme.primary;
@@ -927,7 +939,7 @@ function App() {
             </div>
 
             {isThemeModalOpen && <ThemeSelector theme={currentTheme} saveTheme={saveUserTheme} onClose={() => setIsThemeModalOpen(false)} />}
-            {isCaptureModalOpen && <AIOcrCaptureModal theme={currentTheme} onAnalysisSuccess={handleAiCaptureSuccess} onClose={() => setIsCaptureModalOpen(false)} stream={streamRef.current} />}
+            {isCaptureModalOpen && <AIOcrCaptureModal theme={currentTheme} onAnalysisSuccess={handleAiCaptureSuccess} onClose={() => setIsCaptureModalOpen(false)} />}
             {isStoreSelectorOpen && <StoreSelector theme={currentTheme} onSelect={handleStoreSelect} onClose={() => setIsStoreSelectorOpen(false)} />}
         </div>
     );

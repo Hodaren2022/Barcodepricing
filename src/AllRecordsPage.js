@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { ArrowLeft, Database, TrendingUp } from 'lucide-react';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { ArrowLeft, Database, TrendingUp, Edit, Trash2, Save, X, CheckCircle } from 'lucide-react';
+import { collection, getDocs, query, orderBy, where, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 
 // 圖表組件
 const CHART_WIDTH = 400;
@@ -53,7 +53,7 @@ function PriceTrendChart({ records, productName }) {
                 <polyline fill="none" stroke="#4F46E5" strokeWidth="2" points={points} />
                 {validRecords.map((record, index) => {
                     const [x, y] = points.split(' ')[index].split(',').map(Number);
-                    return <circle key={index} cx={x} cy={y} r="3" fill={index === validRecords.length - 1 ? '#10B981' : '#4F46E5'} title={`$${record.price} at ${record.timestamp.toLocaleDateString()}`} />;
+                    return <circle key={index} cx={x} cy={y} r="3" fill={index === validRecords.length - 1 ? '#10B981' : '#4F46E5'} title={`${record.price} at ${record.timestamp.toLocaleDateString()}`} />;
                 })}
             </svg>
             <div className="text-xs text-gray-500 mt-2 flex justify-between px-3">
@@ -64,8 +64,71 @@ function PriceTrendChart({ records, productName }) {
     );
 }
 
+// 可滑動的記錄項目
+function SwipeableRecord({ children, onEdit, onDelete }) {
+    const [translateX, setTranslateX] = useState(0);
+    const touchStartX = useRef(0);
+    const itemRef = useRef(null);
+
+    const handleTouchStart = (e) => {
+        touchStartX.current = e.touches[0].clientX;
+    };
+
+    const handleTouchMove = (e) => {
+        const touchCurrentX = e.touches[0].clientX;
+        const diff = touchCurrentX - touchStartX.current;
+        if (diff < 0) { // 只允許向左滑動
+            setTranslateX(Math.max(diff, -160)); // -160 是按鈕寬度的總和
+        }
+    };
+
+    const handleTouchEnd = () => {
+        if (translateX < -80) {
+            setTranslateX(-160);
+        } else {
+            setTranslateX(0);
+        }
+    };
+
+    const handleEdit = () => {
+        onEdit();
+        setTranslateX(0);
+    };
+
+    const handleDelete = () => {
+        onDelete();
+        setTranslateX(0);
+    };
+
+    return (
+        <div className="relative overflow-hidden">
+            <div className="absolute top-0 right-0 h-full flex items-center">
+                <button onClick={handleEdit} className="bg-blue-500 text-white h-full w-20 flex flex-col items-center justify-center">
+                    <Edit size={20} />
+                    <span>編輯</span>
+                </button>
+                <button onClick={handleDelete} className="bg-red-500 text-white h-full w-20 flex flex-col items-center justify-center">
+                    <Trash2 size={20} />
+                    <span>刪除</span>
+                </button>
+            </div>
+            <div
+                ref={itemRef}
+                className="transition-transform duration-300 ease-in-out"
+                style={{ transform: `translateX(${translateX}px)` }}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+            >
+                {children}
+            </div>
+        </div>
+    );
+}
+
+
 // 產品記錄組件
-function ProductRecord({ product, records, theme }) {
+function ProductRecord({ product, records, theme, onEdit, onDelete }) {
     const formattedRecords = records.map(r => ({ ...r, timestamp: r.timestamp?.toDate ? r.timestamp.toDate() : new Date(r.timestamp) })).sort((a, b) => b.timestamp - a.timestamp);
     
     const latestRecord = formattedRecords[0];
@@ -102,16 +165,22 @@ function ProductRecord({ product, records, theme }) {
                 <h4 className="font-semibold text-gray-700 mb-2">價格記錄詳情</h4>
                 <div className="space-y-2 max-h-40 overflow-y-auto">
                     {formattedRecords.map((record, index) => (
-                        <div key={index} className="flex justify-between items-center p-2 bg-gray-50 rounded">
-                            <div>
-                                <p className="font-medium">${record.price.toFixed(2)}</p>
-                                {record.discountDetails && <p className="text-xs text-indigo-600">{record.discountDetails}</p>}
+                        <SwipeableRecord
+                            key={index}
+                            onEdit={() => onEdit(record)}
+                            onDelete={() => onDelete(record)}
+                        >
+                            <div className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                                <div>
+                                    <p className="font-medium">${record.price.toFixed(2)}</p>
+                                    {record.discountDetails && <p className="text-xs text-indigo-600">{record.discountDetails}</p>}
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-xs text-gray-500">{record.storeName || '未標註'}</p>
+                                    <p className="text-xs text-gray-500">{record.timestamp.toLocaleDateString()}</p>
+                                </div>
                             </div>
-                            <div className="text-right">
-                                <p className="text-xs text-gray-500">{record.storeName || '未標註'}</p>
-                                <p className="text-xs text-gray-500">{record.timestamp.toLocaleDateString()}</p>
-                            </div>
-                        </div>
+                        </SwipeableRecord>
                     ))}
                 </div>
             </div>
@@ -125,41 +194,44 @@ function AllRecordsPage({ theme, onBack, db }) {
     const [allRecords, setAllRecords] = useState({});
     const [loading, setLoading] = useState(true);
     const [sortOption, setSortOption] = useState('latest'); // latest, name, price
+    const [editingRecord, setEditingRecord] = useState(null);
+    const [deletingRecord, setDeletingRecord] = useState(null);
+    const [successMessage, setSuccessMessage] = useState('');
+
+    const fetchData = async () => {
+        if (!db) return;
+        setLoading(true);
+        try {
+            // 1. Fetch all products
+            const productsQuery = query(collection(db, "products"), orderBy("createdAt", "desc"));
+            const productsSnap = await getDocs(productsQuery);
+            const productsArray = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            
+            // 2. Fetch all records
+            const recordsQuery = query(collection(db, "priceRecords"), orderBy("timestamp", "desc"));
+            const recordsSnap = await getDocs(recordsQuery);
+            const recordsArray = recordsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            // 3. Group records by product ID
+            const recordsByProduct = {};
+            recordsArray.forEach(record => {
+                if (!recordsByProduct[record.numericalID]) {
+                    recordsByProduct[record.numericalID] = [];
+                }
+                recordsByProduct[record.numericalID].push(record);
+            });
+
+            setAllProducts(productsArray);
+            setAllRecords(recordsByProduct);
+
+        } catch (error) {
+            console.error('讀取 Firestore 數據失敗:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
-        const fetchData = async () => {
-            if (!db) return;
-            setLoading(true);
-            try {
-                // 1. Fetch all products
-                const productsQuery = query(collection(db, "products"), orderBy("createdAt", "desc"));
-                const productsSnap = await getDocs(productsQuery);
-                const productsArray = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                
-                // 2. Fetch all records
-                const recordsQuery = query(collection(db, "priceRecords"), orderBy("timestamp", "desc"));
-                const recordsSnap = await getDocs(recordsQuery);
-                const recordsArray = recordsSnap.docs.map(doc => doc.data());
-
-                // 3. Group records by product ID
-                const recordsByProduct = {};
-                recordsArray.forEach(record => {
-                    if (!recordsByProduct[record.numericalID]) {
-                        recordsByProduct[record.numericalID] = [];
-                    }
-                    recordsByProduct[record.numericalID].push(record);
-                });
-
-                setAllProducts(productsArray);
-                setAllRecords(recordsByProduct);
-
-            } catch (error) {
-                console.error('讀取 Firestore 數據失敗:', error);
-            } finally {
-                setLoading(false);
-            }
-        };
-
         fetchData();
     }, [db]);
 
@@ -188,6 +260,50 @@ function AllRecordsPage({ theme, onBack, db }) {
         });
     }, [allProducts, allRecords, sortOption]);
 
+    const showSuccessMessage = (message) => {
+        setSuccessMessage(message);
+        setTimeout(() => {
+            setSuccessMessage('');
+        }, 2000);
+    };
+
+    const handleEdit = (record) => {
+        setEditingRecord(record);
+    };
+
+    const handleDelete = (record) => {
+        setDeletingRecord(record);
+    };
+
+    const handleSaveEdit = async (updatedRecord) => {
+        if (!db) return;
+        try {
+            const recordRef = doc(db, "priceRecords", updatedRecord.id);
+            await updateDoc(recordRef, {
+                price: updatedRecord.price,
+                discountDetails: updatedRecord.discountDetails
+            });
+            await fetchData(); // 重新獲取數據以更新UI
+            showSuccessMessage('記錄已成功更新');
+        } catch (error) {
+            console.error("更新記錄失敗:", error);
+        }
+        setEditingRecord(null);
+    };
+
+    const confirmDelete = async () => {
+        if (!db || !deletingRecord) return;
+        try {
+            const recordRef = doc(db, "priceRecords", deletingRecord.id);
+            await deleteDoc(recordRef);
+            await fetchData(); // 重新獲取數據以更新UI
+            showSuccessMessage('記錄已成功刪除');
+        } catch (error) {
+            console.error("刪除記錄失敗:", error);
+        }
+        setDeletingRecord(null);
+    };
+
     if (loading) {
         return (
             <div className="min-h-screen p-4 sm:p-8 bg-gray-100">
@@ -205,6 +321,7 @@ function AllRecordsPage({ theme, onBack, db }) {
     return (
         <div className="min-h-screen p-4 sm:p-8 bg-gray-100">
             <div className="max-w-4xl mx-auto">
+                <SuccessMessage message={successMessage} />
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6">
                     <div className="flex items-center mb-4 sm:mb-0">
                         <button onClick={onBack} className="flex items-center text-indigo-600 hover:text-indigo-800 mr-4"><ArrowLeft className="mr-1" size={20} />返回</button>
@@ -237,11 +354,100 @@ function AllRecordsPage({ theme, onBack, db }) {
                         {sortedProducts.map(product => {
                             const records = allRecords[product.numericalID] || [];
                             if (records.length === 0) return null;
-                            return <ProductRecord key={product.numericalID} product={product} records={records} theme={theme} />;
+                            return <ProductRecord key={product.numericalID} product={product} records={records} theme={theme} onEdit={handleEdit} onDelete={handleDelete} />;
                         })}
                     </div>
                 )}
+
+                {editingRecord && (
+                    <EditModal
+                        record={editingRecord}
+                        onClose={() => setEditingRecord(null)}
+                        onSave={handleSaveEdit}
+                    />
+                )}
+
+                {deletingRecord && (
+                    <DeleteConfirmation
+                        record={deletingRecord}
+                        onClose={() => setDeletingRecord(null)}
+                        onConfirm={confirmDelete}
+                    />
+                )}
             </div>
+        </div>
+    );
+}
+
+function EditModal({ record, onClose, onSave }) {
+    const [price, setPrice] = useState(record.price);
+    const [discount, setDiscount] = useState(record.discountDetails || '');
+
+    const handleSave = () => {
+        onSave({ ...record, price: parseFloat(price), discountDetails: discount });
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
+                <h2 className="text-xl font-bold mb-4">編輯記錄</h2>
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">價格</label>
+                        <input
+                            type="number"
+                            value={price}
+                            onChange={(e) => setPrice(e.target.value)}
+                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">折扣詳情</label>
+                        <input
+                            type="text"
+                            value={discount}
+                            onChange={(e) => setDiscount(e.target.value)}
+                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                    </div>
+                </div>
+                <div className="mt-6 flex justify-end space-x-3">
+                    <button onClick={onClose} className="flex items-center bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300">
+                        <X size={18} className="mr-1" />
+                        取消
+                    </button>
+                    <button onClick={handleSave} className="flex items-center bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700">
+                        <Save size={18} className="mr-1" />
+                        保存
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function DeleteConfirmation({ record, onClose, onConfirm }) {
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
+                <h2 className="text-xl font-bold mb-4">確認刪除</h2>
+                <p>您確定要刪除這條價格為 ${record.price.toFixed(2)} 的記錄嗎？此操作無法復原。</p>
+                <div className="mt-6 flex justify-end space-x-3">
+                    <button onClick={onClose} className="bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300">取消</button>
+                    <button onClick={onConfirm} className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700">確認刪除</button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function SuccessMessage({ message }) {
+    if (!message) return null;
+
+    return (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center z-50">
+            <CheckCircle size={20} className="mr-2" />
+            <span>{message}</span>
         </div>
     );
 }

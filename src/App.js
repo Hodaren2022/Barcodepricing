@@ -751,10 +751,10 @@ function App() {
                 
                 if (isBest) {
                     toastStatus = 'success';
-                    toastMessage = '恭喜！這是目前紀錄中的最低標價！';
+                    toastMessage = '恭喜！這是目前紀錄中的最低單價！';
                 } else {
                     toastStatus = 'warning';
-                    toastMessage = `非最低標價。歷史最低單價為 $${(bestDeal.unitPrice || 0).toFixed(2)} (${bestDeal.storeName})`;
+                    toastMessage = `非最低單價。歷史最低單價為 $${(bestDeal.unitPrice || 0).toFixed(2)} (${bestDeal.storeName})`;
                 }
             }
 

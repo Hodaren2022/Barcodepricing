@@ -75,6 +75,16 @@ const withExponentialBackoff = async (fn, retries = 5, delay = 1000) => {
 };
 
 
+function generateProductId(barcode, productName, storeName) {
+    if (barcode) {
+        return djb2Hash(barcode).toString();
+    } else {
+        // Combine productName and storeName to create a unique ID for products without barcodes
+        // This assumes productName + storeName is sufficiently unique for non-barcoded items
+        return djb2Hash(`${productName}-${storeName}`).toString();
+    }
+}
+
 // ----------------------------------------------------------------------------
 // 2. UI 元件 (UI Components)
 // ----------------------------------------------------------------------------
@@ -597,16 +607,18 @@ function App() {
         }
     };
 
-    const lookupProduct = useCallback(async (barcodeData) => {
-        if (!barcodeData || barcodeData.length < 5) {
+    const lookupProduct = useCallback(async (barcodeData, currentProductName, currentStoreName) => {
+        const numericalID = generateProductId(barcodeData, currentProductName, currentStoreName);
+
+        // Adjust early exit condition:
+        // If no barcode and no product name, or if barcode is too short and no product name,
+        // then we can't look up a product.
+        if (!numericalID || (!barcodeData && !currentProductName) || (barcodeData && barcodeData.length < 5 && !currentProductName)) {
             setProductName('');
             setLookupStatus('ready');
             setProductHistory([]);
             return;
         }
-
-        setLookupStatus('searching');
-        const numericalID = djb2Hash(barcodeData);
         
         try {
             const productRef = doc(db, "products", numericalID.toString());
@@ -637,13 +649,16 @@ function App() {
     }, []);
 
     useEffect(() => {
-        if (barcode.length > 0 && isAuthReady) {
-            const timer = setTimeout(() => { lookupProduct(barcode); }, 500);
+        if (isAuthReady) { // Only run if auth is ready
+            const timer = setTimeout(() => {
+                // Pass current productName and storeName from state
+                lookupProduct(barcode, productName, storeName);
+            }, 500);
             return () => clearTimeout(timer);
         } else if (barcode.length === 0) {
             clearForm();
         }
-    }, [barcode, isAuthReady, lookupProduct, clearForm]);
+    }, [barcode, isAuthReady, lookupProduct, clearForm, productName, storeName]);
 
     useEffect(() => {
         if (statusMessage) {
@@ -682,10 +697,10 @@ function App() {
 
     const saveAndComparePrice = useCallback(async (selectedStore) => {
         const finalStoreName = selectedStore || storeName;
-        const numericalID = djb2Hash(barcode);
+        const numericalID = generateProductId(barcode, productName, finalStoreName);
         const priceValue = parseFloat(currentPrice);
 
-        if (!userId || !barcode || !productName || isNaN(priceValue) || isNaN(parseFloat(quantity)) || parseFloat(quantity) <= 0 || unitPrice === null) {
+        if (!userId || !productName || isNaN(priceValue) || isNaN(parseFloat(quantity)) || parseFloat(quantity) <= 0 || unitPrice === null) {
             setSaveResultToast({ status: 'error', message: '請確保已輸入條碼、產品名稱、有效總價、數量和單位！', productName: productName || "未知產品" });
             return;
         }
@@ -761,7 +776,7 @@ function App() {
             setComparisonResult({ isBest, bestPrice, bestStore, message: toastMessage });
             setSaveResultToast({ status: toastStatus, message: toastMessage, productName: productName });
             
-            lookupProduct(barcode);
+            lookupProduct(barcode, productName, finalStoreName);
 
         } catch (error) {
             console.error("儲存或比價失敗 (Firestore):", error);

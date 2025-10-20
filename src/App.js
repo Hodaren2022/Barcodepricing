@@ -320,10 +320,10 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
             const finalData = {
                 scannedBarcode: analysisResult.scannedBarcode || '', // AI 可能不會提供條碼，需要處理
                 productName: analysisResult.productName,
-                extractedPrice: listedPrice.toString(), // 轉換為字串以符合現有狀態
+                extractedPrice: (listedPrice !== undefined && listedPrice !== null) ? listedPrice.toString() : '', // 轉換為字串以符合現有狀態
                 storeName: analysisResult.storeName || 'AI 辨識', // 臨時數據：假設此處應有 storeName
                 discountDetails: analysisResult.discountDetails || '',
-                quantity: totalCapacity.toString(), // 轉換為字串以符合現有狀態
+                quantity: (totalCapacity !== undefined && totalCapacity !== null) ? totalCapacity.toString() : '', // 轉換為字串以符合現有狀態
                 unitType: baseUnit,
                 unitPrice: unitPrice,
             };

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffect } from 'react';
 import { ArrowLeft, Database, TrendingUp, Edit, Trash2, Save, X, CheckCircle, Search } from 'lucide-react';
 import { collection, getDocs, query, orderBy, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { calculateUnitPrice } from './utils/priceCalculations';
 
 // 圖表組件
 const CHART_WIDTH = 400;
@@ -63,6 +64,51 @@ function PriceTrendChart({ records, productName }) {
             </div>
         </div>
     );
+}
+
+// Fuzzy search function
+function fuzzyMatch(pattern, text) {
+    const pattern_lower = pattern.toLowerCase();
+    const text_lower = text.toLowerCase();
+    let patternIdx = 0;
+    let textIdx = 0;
+    let score = 0;
+    let consecutive = 0;
+    let firstMatchIndex = -1;
+
+    // Iterate through text to find pattern characters
+    while (patternIdx < pattern_lower.length && textIdx < text_lower.length) {
+        if (pattern_lower[patternIdx] === text_lower[textIdx]) {
+            if (firstMatchIndex === -1) {
+                firstMatchIndex = textIdx;
+            }
+            score += 1;
+            // Add bonus for consecutive matches
+            if (consecutive > 0) {
+                score += consecutive;
+            }
+            consecutive++;
+            patternIdx++;
+        } else {
+            consecutive = 0;
+        }
+        textIdx++;
+    }
+
+    // If the whole pattern was found
+    if (patternIdx === pattern_lower.length) {
+        // Add bonus for being a prefix
+        if (firstMatchIndex === 0) {
+            score += 5;
+        }
+        // Add bonus for tightness of the match
+        const matchDensity = pattern.length / (textIdx - firstMatchIndex);
+        score *= (1 + matchDensity);
+
+        return score;
+    }
+
+    return 0;
 }
 
 // 可滑動的記錄項目
@@ -224,6 +270,7 @@ function AllRecordsPage({ theme, onBack, db }) {
     const [isAfterDelete, setIsAfterDelete] = useState(false); // Signal for scroll restoration
     const [searchQuery, setSearchQuery] = useState('');
     const [isSearchOpen, setIsSearchOpen] = useState(false);
+    const searchInputRef = useRef(null);
 
     const fetchData = useCallback(async () => {
         if (!db) return;
@@ -262,6 +309,12 @@ function AllRecordsPage({ theme, onBack, db }) {
         fetchData();
     }, [fetchData]);
 
+    useEffect(() => {
+        if (isSearchOpen && searchInputRef.current) {
+            setTimeout(() => searchInputRef.current.focus(), 300); // Delay for transition
+        }
+    }, [isSearchOpen]);
+
     useLayoutEffect(() => {
         if (isAfterDelete && !loading) {
             window.scrollTo(0, scrollPositionRef.current);
@@ -270,7 +323,22 @@ function AllRecordsPage({ theme, onBack, db }) {
     }, [loading, isAfterDelete]);
 
     const filteredProducts = useMemo(() => {
-        const sorted = [...allProducts].sort((a, b) => {
+        let products = [...allProducts];
+
+        if (searchQuery) {
+            const scoredProducts = products
+                .map(product => ({
+                    product,
+                    score: fuzzyMatch(searchQuery, product.productName)
+                }))
+                .filter(item => item.score > 0)
+                .sort((a, b) => b.score - a.score);
+            
+            return scoredProducts.map(item => item.product);
+        }
+        
+        // If no search query, sort as usual
+        products.sort((a, b) => {
             const recordsA = allRecords[a.numericalID] || [];
             const recordsB = allRecords[b.numericalID] || [];
             
@@ -293,13 +361,7 @@ function AllRecordsPage({ theme, onBack, db }) {
             return timeB - timeA;
         });
 
-        if (!searchQuery) {
-            return sorted;
-        }
-
-        return sorted.filter(product =>
-            product.productName.toLowerCase().includes(searchQuery.toLowerCase())
-        );
+        return products;
     }, [allProducts, allRecords, sortOption, searchQuery]);
 
     const showSuccessMessage = (message) => {
@@ -348,6 +410,13 @@ function AllRecordsPage({ theme, onBack, db }) {
         setDeletingRecord(null);
     };
 
+    const handleSearchToggle = () => {
+        if (isSearchOpen) {
+            setSearchQuery('');
+        }
+        setIsSearchOpen(!isSearchOpen);
+    };
+
     if (loading) {
         return (
             <div className="min-h-screen p-4 sm:p-8 bg-gray-100">
@@ -364,7 +433,7 @@ function AllRecordsPage({ theme, onBack, db }) {
 
     return (
         <div className="min-h-screen p-4 sm:p-8 bg-gray-100">
-            <div className="max-w-4xl mx-auto pb-20"> {/* Added pb-20 for floating button */}
+            <div className="max-w-4xl mx-auto pb-28"> {/* Added pb-20 for floating button */}
                 <SuccessMessage message={successMessage} />
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6">
                     <div className="flex items-center mb-4 sm:mb-0">
@@ -380,21 +449,6 @@ function AllRecordsPage({ theme, onBack, db }) {
                         </select>
                     </div>
                 </div>
-
-                {isSearchOpen && (
-                    <div className="mb-4">
-                        <div className="relative">
-                            <input
-                                type="text"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="輸入品名進行模糊搜尋..."
-                                className="w-full p-3 pl-10 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                            />
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                        </div>
-                    </div>
-                )}
 
                 {filteredProducts.length === 0 ? (
                     <div className="text-center py-10 bg-white rounded-xl shadow">
@@ -434,13 +488,28 @@ function AllRecordsPage({ theme, onBack, db }) {
                     />
                 )}
 
-                <button
-                    onClick={() => setIsSearchOpen(!isSearchOpen)}
-                    className="fixed bottom-6 right-6 bg-indigo-600 text-white p-4 rounded-full shadow-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-transform duration-300 ease-in-out"
-                    aria-label="搜尋"
-                >
-                    {isSearchOpen ? <X size={24} /> : <Search size={24} />}
-                </button>
+                <div className="fixed bottom-6 right-6 z-30 flex items-center justify-end">
+                    <div className={`relative flex items-center justify-end transition-all duration-300 ease-in-out ${isSearchOpen ? 'w-80' : 'w-16'}`}>
+                        <div className={`absolute inset-0 bg-white rounded-full shadow-lg transition-all duration-300 ease-in-out ${isSearchOpen ? 'opacity-100' : 'opacity-0'}`}></div>
+                        <Search className={`absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 transition-opacity duration-200 ${isSearchOpen ? 'opacity-100' : 'opacity-0'}`} size={22} />
+                        <input
+                            ref={searchInputRef}
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="輸入品名進行模糊搜尋..."
+                            className={`w-full h-16 pl-14 pr-20 bg-transparent border-none rounded-full outline-none text-lg transition-opacity duration-200 ${isSearchOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+                        />
+        
+                        <button
+                            onClick={handleSearchToggle}
+                            className="absolute right-0 top-0 w-16 h-16 bg-indigo-600 text-white rounded-full shadow-xl hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-300 flex items-center justify-center z-10"
+                            aria-label={isSearchOpen ? "關閉搜尋" : "開啟搜尋"}
+                        >
+                            {isSearchOpen ? <X size={28} /> : <Search size={28} />}
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     );
@@ -452,21 +521,8 @@ function EditModal({ record, onClose, onSave }) {
     const [unitType, setUnitType] = useState(record.unitType || 'pcs');
     const [discount, setDiscount] = useState(record.discountDetails || '');
 
-    const calculateUnitPrice = useCallback(() => {
-        const p = parseFloat(price);
-        const q = parseFloat(quantity);
-        if (!isNaN(p) && !isNaN(q) && q > 0) {
-            if (unitType === 'g' || unitType === 'ml') {
-                return (p / q) * 100;
-            } else { // For 'pcs' and any other unit
-                return p / q;
-            }
-        }
-        return null;
-    }, [price, quantity, unitType]);
-
     const handleSave = () => {
-        const newUnitPrice = calculateUnitPrice();
+        const newUnitPrice = calculateUnitPrice(price, quantity, unitType);
         if (newUnitPrice === null) {
             alert("請輸入有效的價格和數量。");
             return;
@@ -480,6 +536,8 @@ function EditModal({ record, onClose, onSave }) {
             discountDetails: discount 
         });
     };
+
+    const currentUnitPrice = calculateUnitPrice(price, quantity, unitType);
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -520,7 +578,7 @@ function EditModal({ record, onClose, onSave }) {
                         <label className="block text-sm font-medium text-gray-700">單價 (自動計算)</label>
                         <input
                             type="text"
-                            value={isNaN(calculateUnitPrice()) ? 'N/A' : calculateUnitPrice().toFixed(2)}
+                            value={currentUnitPrice === null ? 'N/A' : currentUnitPrice.toFixed(2)}
                             readOnly
                             className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-gray-100"
                         />

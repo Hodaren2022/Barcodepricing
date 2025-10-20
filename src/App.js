@@ -539,7 +539,6 @@ function App() {
     const [isCaptureModalOpen, setIsCaptureModalOpen] = useState(false);
     const [isStoreSelectorOpen, setIsStoreSelectorOpen] = useState(false);
     const [currentPage, setCurrentPage] = useState('main');
-    const [ocrResult, setOcrResult] = useState(null);
 
     // REFACTOR: Calculate unit price in real-time using the utility function
     useEffect(() => {
@@ -558,7 +557,6 @@ function App() {
         setStoreName('');
         setRecords([]);
         setComparisonResult(null);
-        setOcrResult(null);
         setLookupStatus('ready');
         setLastVisible(null);
         setHasMore(true);
@@ -663,7 +661,6 @@ function App() {
     }, [statusMessage]);
 
     const handleAiCaptureSuccess = useCallback((result) => {
-        setOcrResult(result);
         const { scannedBarcode, productName, extractedPrice, storeName, discountDetails, quantity, unitType } = result;
         
         if (scannedBarcode && scannedBarcode !== barcode) {

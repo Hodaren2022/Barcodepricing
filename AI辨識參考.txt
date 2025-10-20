@@ -1,0 +1,284 @@
+import React, { useState, useEffect, useCallback } from 'react';
+
+// 假設這些是您的主題顏色配置
+const themeConfig = {
+    'blue': { primary: 'indigo-600', hover: 'indigo-700', bg: 'indigo-50' },
+    'red': { primary: 'red-600', hover: 'red-700', bg: 'red-50' },
+    // ... 其他主題色
+};
+
+// 輔助函數：將 base64 轉換為 ArrayBuffer (用於 TTS - 儘管這裡未使用，但作為標準庫函數備著)
+function base64ToArrayBuffer(base64) {
+    const binaryString = atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
+}
+
+// 輔助函數：實現指數退避 (Exponential Backoff)
+const withExponentialBackoff = async (fn, retries = 5, delay = 1000) => {
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await fn();
+        } catch (error) {
+            if (i === retries - 1) throw error;
+            console.warn(`Attempt ${i + 1} failed, retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            delay *= 2;
+        }
+    }
+};
+
+const AIOcrCaptureModal = ({ theme, onAnalysisSuccess, onClose }) => {
+    const [imageSrc, setImageSrc] = useState(null);
+    const [base64Image, setBase64Image] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [resultData, setResultData] = useState(null);
+    const [error, setError] = useState(null);
+
+    const currentTheme = themeConfig[theme] || themeConfig['blue'];
+    const apiKey = ""; // 保持空白，讓 Canvas 注入
+
+    const handleImageChange = (event) => {
+        const file = event.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                setImageSrc(e.target.result);
+                // 儲存 base64 字串供 API 使用
+                const base64 = e.target.result.split(',')[1];
+                setBase64Image(base64);
+                setError(null);
+                setResultData(null);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const handleAnalyzeImage = useCallback(async () => {
+        if (!base64Image) {
+            setError("請先選擇一張包含價格或規格的圖片。");
+            return;
+        }
+
+        setIsLoading(true);
+        setError(null);
+        setResultData(null);
+
+        const userQuery = "請根據圖片中的標價、產品名稱和規格（質量/容量/數量），以嚴格的 JSON 格式輸出結構化數據。請特別注意計算產品的總容量/總質量。";
+        
+        // 核心變更：定義新的 JSON Schema
+        const newSchema = {
+            type: "OBJECT",
+            properties: {
+                productName: { "type": "STRING", "description": "產品名稱，例如：家庭號牛奶" },
+                listedPrice: { "type": "NUMBER", "description": "產品標價（純數字，例如 59）" },
+                totalCapacity: { "type": "NUMBER", "description": "產品的總容量/總質量/總數量（純數字）。例如：若產品是 '18克10入'，則總容量是 180；若產品是 '2000ml'，則總容量是 2000。" },
+                baseUnit: { "type": "STRING", "description": "用於計算單價的基礎單位。僅使用 'g' (克), 'ml' (毫升), 或 'pcs' (個/入)。如果是質量，請統一使用 'g'。" }
+            },
+            propertyOrdering: ["productName", "listedPrice", "totalCapacity", "baseUnit"]
+        };
+        
+        // 核心變更：定義嚴格的系統指令
+        const systemPrompt = `
+            你是一個專業的價格數據分析助理。你的任務是從圖像中識別產品名稱、標價以及完整的容量/質量/數量資訊，並將其格式化為嚴格的 JSON 輸出。
+            **計算規則（重要）：**
+            1. 標價 (listedPrice) 必須是純數字。
+            2. 總容量 (totalCapacity) 必須是純數字。
+            3. 如果產品標示為「X 克 Y 入」，**必須**計算總質量： totalCapacity = X * Y。例如：「18克10入」-> 180。
+            4. 如果產品標示為「X 毫升 Y 瓶」，**必須**計算總容量： totalCapacity = X * Y。
+            5. 如果產品標示為「Z 個」，則 totalCapacity = Z。
+            6. 基礎單位 (baseUnit) 必須是 'g', 'ml', 或 'pcs' 之一。質量請用 'g'。
+            請勿輸出任何 JSON 以外的文字、註釋或說明。
+        `;
+
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+        const payload = {
+            contents: [
+                {
+                    role: "user",
+                    parts: [
+                        { text: userQuery },
+                        {
+                            inlineData: {
+                                mimeType: "image/jpeg",
+                                data: base64Image
+                            }
+                        }
+                    ]
+                }
+            ],
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            generationConfig: {
+                responseMimeType: "application/json",
+                responseSchema: newSchema
+            }
+        };
+
+        try {
+            const response = await withExponentialBackoff(async () => {
+                const res = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) {
+                    throw new Error(`API error: ${res.status} ${res.statusText}`);
+                }
+                return res.json();
+            });
+
+            const jsonText = response.candidates?.[0]?.content?.parts?.[0]?.text;
+            
+            if (jsonText) {
+                let parsedJson;
+                try {
+                    // **修正 1: 安全地嘗試解析 JSON**
+                    parsedJson = JSON.parse(jsonText);
+                } catch (jsonError) {
+                    console.error("JSON Parsing Failed:", jsonText, jsonError);
+                    setError("AI 回傳的數據格式無效，無法解析 JSON。請嘗試重新拍攝或換一張圖片。");
+                    return; // 終止執行，避免使用無效數據
+                }
+
+                setResultData(parsedJson);
+
+                // **修正 2：數據安全訪問與預設值設置**
+                // 即使 AI 輸出 JSON 缺少這些屬性，它們也會安全地被設置為 0 或空字串
+                const { 
+                    listedPrice = 0, 
+                    totalCapacity = 0, 
+                    baseUnit = '' 
+                } = parsedJson;
+                
+                let unitPrice = 0;
+                
+                // 確保價格和容量大於零才進行計算
+                if (listedPrice > 0 && totalCapacity > 0) {
+                     // 假設我們以每 100g/ml 或每個為標準
+                    if (baseUnit === 'g' || baseUnit === 'ml') {
+                        // 價格 / (總容量 / 100) = 每 100 單位價格
+                        unitPrice = (listedPrice / totalCapacity) * 100;
+                    } else if (baseUnit === 'pcs') {
+                        // 價格 / 總數量 = 每個單價
+                        unitPrice = listedPrice / totalCapacity;
+                    }
+                }
+                
+                // 準備傳遞給父組件的數據，包含計算出的單價
+                const finalData = {
+                    ...parsedJson,
+                    unitPrice: unitPrice,
+                    standard: (baseUnit === 'g' || baseUnit === 'ml') ? `每 100${baseUnit}` : `每個`,
+                    timestamp: Date.now(),
+                    // 臨時數據：假設此處應有 storeName
+                    storeName: '待定義店舖' 
+                };
+
+                onAnalysisSuccess(finalData);
+
+            } else {
+                setError("AI 分析失敗或未能返回有效的 JSON 數據。");
+            }
+        } catch (err) {
+            console.error("API Call Failed:", err);
+            // 確保無論 err 是什麼類型，都能提取一個可讀的字串
+            const errorMessage = err.message || (err.toString && err.toString()) || "未知錯誤，請檢查主控台獲取詳細資訊。";
+            setError(`分析過程中發生錯誤: ${errorMessage}`);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [base64Image, onAnalysisSuccess]);
+
+    useEffect(() => {
+        // 在組件掛載時，確保 apiKey 存在
+        if (!apiKey && typeof __initial_auth_token === 'undefined') {
+            console.warn("API Key is missing. Check environment setup.");
+        }
+    }, [apiKey]);
+
+
+    return (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-gray-900 bg-opacity-75 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl p-6 transform transition-all">
+                <h2 className={`text-2xl font-bold mb-4 text-${currentTheme.primary}`}>AI 視覺擷取與單價分析</h2>
+                
+                {/* 1. 圖片上傳區 */}
+                <div className="mb-4">
+                    <label className={`block text-sm font-medium text-gray-700 mb-2`}>
+                        上傳產品照片 (含價格與規格)
+                    </label>
+                    <input 
+                        type="file" 
+                        accept="image/*" 
+                        onChange={handleImageChange} 
+                        className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                    />
+                </div>
+                
+                {/* 2. 圖片預覽區 */}
+                {imageSrc && (
+                    <div className="mb-4">
+                        <h3 className="text-lg font-semibold mb-2">預覽圖片：</h3>
+                        <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-lg p-2">
+                            <img src={imageSrc} alt="上傳預覽" className="max-w-full h-auto rounded-lg shadow-md" />
+                        </div>
+                    </div>
+                )}
+                
+                {/* 3. 操作按鈕與狀態 */}
+                <div className="flex justify-end space-x-3 mb-4">
+                    <button 
+                        onClick={onClose} 
+                        className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-full hover:bg-gray-200 transition duration-150"
+                        disabled={isLoading}
+                    >
+                        取消/關閉
+                    </button>
+                    <button 
+                        onClick={handleAnalyzeImage} 
+                        className={`px-6 py-2 text-sm font-semibold text-white bg-${currentTheme.primary} rounded-full shadow-md hover:bg-${currentTheme.hover} transition duration-150 flex items-center justify-center`}
+                        disabled={isLoading || !base64Image}
+                    >
+                        {isLoading ? (
+                             <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        ) : '開始分析'}
+                    </button>
+                </div>
+
+                {/* 4. 結果顯示/錯誤區 */}
+                {error && (
+                    <div className={`p-3 rounded-lg bg-red-100 border border-red-400 text-red-700 text-sm mb-4`}>
+                        錯誤: {error}
+                    </div>
+                )}
+
+                {resultData && (
+                    <div className={`p-4 rounded-lg bg-${currentTheme.bg} border border-${currentTheme.primary} mb-4`}>
+                        <h3 className="text-lg font-semibold mb-2">分析結果：</h3>
+                        <pre className="text-xs overflow-auto bg-white p-3 rounded-md border border-gray-300">
+                            {JSON.stringify(resultData, null, 2)}
+                        </pre>
+                        <p className="text-sm mt-2 font-medium text-gray-700">
+                            **結果已成功傳遞並計算單價！**
+                            {/* 臨時展示計算結果 - 實際應在父組件處理 */}
+                            <span className="block mt-1">
+                                **單價標準:** {resultData.standard}
+                                **計算單價:** ${resultData.unitPrice ? resultData.unitPrice.toFixed(2) : 'N/A'}
+                            </span>
+                        </p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+export default AIOcrCaptureModal;

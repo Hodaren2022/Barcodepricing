@@ -310,7 +310,15 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
             console.log("AI Analysis Result:", analysisResult); // Added console.log for debugging
 
             // 計算並添加單價欄位 (從單價計算.txt 複製過來)
-            const { listedPrice, totalCapacity, baseUnit } = analysisResult;
+            const { 
+                scannedBarcode = '', 
+                productName = '', 
+                listedPrice = 0, 
+                totalCapacity = 0, 
+                baseUnit = 'pcs', 
+                storeName = 'AI 辨識', 
+                discountDetails = '' 
+            } = analysisResult;
             let unitPrice = 0;
             if (listedPrice > 0 && totalCapacity > 0) {
                  if (baseUnit === 'g' || baseUnit === 'ml') {
@@ -322,12 +330,12 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
             
             // 準備傳遞給父組件的數據，包含計算出的單價
             const finalData = {
-                scannedBarcode: analysisResult.scannedBarcode || '', // AI 可能不會提供條碼，需要處理
-                productName: analysisResult.productName,
-                extractedPrice: (listedPrice !== undefined && listedPrice !== null) ? listedPrice.toString() : '', // 轉換為字串以符合現有狀態
-                storeName: analysisResult.storeName || 'AI 辨識', // 臨時數據：假設此處應有 storeName
-                discountDetails: analysisResult.discountDetails || '',
-                quantity: (totalCapacity !== undefined && totalCapacity !== null) ? totalCapacity.toString() : '', // 轉換為字串以符合現有狀態
+                scannedBarcode: scannedBarcode,
+                productName: productName,
+                extractedPrice: listedPrice.toString(), // 轉換為字串以符合現有狀態
+                storeName: storeName,
+                discountDetails: discountDetails,
+                quantity: totalCapacity.toString(), // 轉換為字串以符合現有狀態
                 unitType: baseUnit,
                 unitPrice: unitPrice,
             };

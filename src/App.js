@@ -631,13 +631,31 @@ function App() {
                 setLookupStatus('new');
             }
 
-            const recordsQuery = query(
+            const recordsQueryString = query(
                 collection(db, "priceRecords"),
-                where("numericalID", "==", numericalID),
+                where("numericalID", "==", numericalID), // numericalID is already a string
                 orderBy("timestamp", "desc")
             );
-            const recordsSnap = await getDocs(recordsQuery);
-            const records = recordsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const recordsSnapString = await getDocs(recordsQueryString);
+            let records = recordsSnapString.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            // Attempt to query for numericalID as a number, if it's a valid number string
+            const numericalIDAsNumber = parseInt(numericalID, 10);
+            if (!isNaN(numericalIDAsNumber) && numericalIDAsNumber.toString() === numericalID) { // Check if it's a pure number string
+                const recordsQueryNumber = query(
+                    collection(db, "priceRecords"),
+                    where("numericalID", "==", numericalIDAsNumber),
+                    orderBy("timestamp", "desc")
+                );
+                const recordsSnapNumber = await getDocs(recordsQueryNumber);
+                const recordsNumber = recordsSnapNumber.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                // Merge and deduplicate records
+                const mergedRecordsMap = new Map();
+                records.forEach(record => mergedRecordsMap.set(record.id, record));
+                recordsNumber.forEach(record => mergedRecordsMap.set(record.id, record));
+                records = Array.from(mergedRecordsMap.values()).sort((a, b) => (b.timestamp?.toDate ? b.timestamp.toDate().getTime() : 0) - (a.timestamp?.toDate ? a.timestamp.toDate().getTime() : 0));
+            }
             setProductHistory(records);
 
         } catch (error) {

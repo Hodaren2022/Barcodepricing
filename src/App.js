@@ -276,21 +276,24 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
         try {
             const base64Image = capturedImage.split(',')[1];
             
-            const userQuery = "請根據圖片中的標價、產品名稱和規格（質量/容量/數量），以嚴格的 JSON 格式輸出結構化數據。請特別注意計算產品的總容量/總質量。";
+            const userQuery = "請根據圖片中的條碼、標價、產品名稱、規格（質量/容量/數量）、商店名稱和折扣資訊，以嚴格的 JSON 格式輸出結構化數據。請特別注意計算產品的總容量/總質量。";
         
             const newSchema = {
                 type: "OBJECT",
                 properties: {
+                    scannedBarcode: { "type": "STRING", "description": "影像中找到的 EAN, UPC 或其他產品條碼數字，如果不可見則為空字串。" },
                     productName: { "type": "STRING", "description": "產品名稱，例如：家庭號牛奶" },
                     listedPrice: { "type": "NUMBER", "description": "產品標價（純數字，例如 59）" },
                     totalCapacity: { "type": "NUMBER", "description": "產品的總容量/總質量/總數量（純數字）。例如：若產品是 '18克10入'，則總容量是 180；若產品是 '2000ml'，則總容量是 2000。" },
-                    baseUnit: { "type": "STRING", "description": "用於計算單價的基礎單位。僅使用 'g' (克), 'ml' (毫升), 或 'pcs' (個/入)。如果是質量，請統一使用 'g'。" }
+                    baseUnit: { "type": "STRING", "description": "用於計算單價的基礎單位。僅使用 'g' (克), 'ml' (毫升), 或 'pcs' (個/入)。如果是質量，請統一使用 'g'。" },
+                    storeName: { "type": "STRING", "description": "價目標籤或收據所示的商店名稱。如果不可見則為空字串。" },
+                    discountDetails: { "type": "STRING", "description": "發現的任何促銷或折扣的詳細描述（例如：'買一送一', '第二件半價', '有效期限 2026/01/01'）。如果沒有折扣則為空字串。" }
                 },
-                propertyOrdering: ["productName", "listedPrice", "totalCapacity", "baseUnit"]
+                propertyOrdering: ["scannedBarcode", "productName", "listedPrice", "totalCapacity", "baseUnit", "storeName", "discountDetails"]
             };
             
             const systemPrompt = `
-                你是一個專業的價格數據分析助理。你的任務是從圖像中識別產品名稱、標價以及完整的容量/質量/數量資訊，並將其格式化為嚴格的 JSON 輸出。
+                你是一個專業的價格數據分析助理。你的任務是從圖像中識別產品條碼、產品名稱、標價、完整的容量/質量/數量資訊、商店名稱和折扣細節，並將其格式化為嚴格的 JSON 輸出。
                 **計算規則（重要）：**
                 1. 標價 (listedPrice) 必須是純數字。
                 2. 總容量 (totalCapacity) 必須是純數字。

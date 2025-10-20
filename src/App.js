@@ -222,11 +222,11 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [capturedImage, setCapturedImage] = useState(null);
 
-    const resetState = () => {
+    const resetState = useCallback(() => {
         setScanError('');
         setCapturedImage(null);
         setIsAnalyzing(false);
-    };
+    }, []);
 
     useEffect(() => {
         resetState();
@@ -243,21 +243,11 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
         if (!videoRef.current || !videoRef.current.srcObject) return;
         const video = videoRef.current;
         const canvas = document.createElement('canvas');
-        const renderedVideoWidth = video.offsetWidth;
-        const renderedVideoHeight = video.offsetHeight;
-        const targetCanvasWidth = renderedVideoWidth * 0.75;
-        const targetCanvasHeight = renderedVideoHeight * 0.75;
-        const scaleFactor = Math.max(renderedVideoWidth / video.videoWidth, video.videoHeight / video.videoHeight);
-        const scaledIntrinsicWidth = video.videoWidth * scaleFactor;
-        const scaledIntrinsicHeight = video.videoHeight * scaleFactor;
-        const offsetX = (renderedVideoWidth - scaledIntrinsicWidth) / 2;
-        const offsetY = (renderedVideoHeight - scaledIntrinsicHeight) / 2;
-        const captureX_rendered = (renderedVideoWidth - targetCanvasWidth) / 2;
-        const captureY_rendered = (renderedVideoHeight - targetCanvasHeight) / 2;
-        const sx = (captureX_rendered - offsetX) / scaleFactor;
-        const sy = (captureY_rendered - offsetY) / scaleFactor;
-        const sWidth = targetCanvasWidth / scaleFactor;
-        const sHeight = targetCanvasHeight / scaleFactor;
+        const sWidth = video.videoWidth * 0.75;
+        const sHeight = video.videoHeight * 0.75;
+        const sx = (video.videoWidth - sWidth) / 2;
+        const sy = (video.videoHeight - sHeight) / 2;
+
         canvas.width = sWidth;
         canvas.height = sHeight;
         const ctx = canvas.getContext('2d');
@@ -271,12 +261,13 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
         }
     }, []);
 
-    const handleRetake = () => {
+    const handleRetake = useCallback(() => {
         resetState();
-        if (videoRef.current) {
+        if (videoRef.current && stream) {
+            videoRef.current.srcObject = stream;
             videoRef.current.play().catch(err => console.error("Video play failed:", err));
         }
-    };
+    }, [resetState, stream]);
 
     const handleAnalyze = useCallback(async () => {
         if (!capturedImage) { setScanError("沒有可分析的影像。"); return; }

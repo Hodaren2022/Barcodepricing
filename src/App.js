@@ -60,6 +60,20 @@ async function callGeminiApiWithRetry(payload, apiUrl, maxRetries = 3) {
     throw lastError;
 }
 
+const withExponentialBackoff = async (fn, retries = 5, delay = 1000) => {
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await fn();
+        } catch (error) {
+            if (i === retries - 1) throw error;
+            console.warn(`Attempt ${i + 1} failed, retrying in ${delay}ms...`);
+            const currentDelay = delay; // Capture current delay
+            await new Promise(resolve => setTimeout(resolve, currentDelay));
+            delay *= 2;
+        }
+    }
+};
+
 
 // ----------------------------------------------------------------------------
 // 2. UI 元件 (UI Components)
@@ -146,7 +160,7 @@ function PriceHistoryDisplay({ historyRecords, theme }) {
                 {formattedRecords.map((record, index) => (
                     <div key={index} className={`p-3 rounded-lg shadow-sm border border-gray-100 ${index === 0 ? theme.light : 'bg-white'}`}>
                         <div className="flex justify-between items-start font-bold">
-                            <span className="text-2xl text-red-600">{isNaN(record.displayPrice) || record.displayPrice === null ? 'N/A' : `$${record.displayPrice.toFixed(2)}`}</span>
+                            <span className="text-2xl text-red-600">{isNaN(record.price) || isNaN(record.unitPrice) ? 'N/A' : `$${(record.price || 0).toFixed(2)}@${(record.unitPrice || 0).toFixed(2)}`}</span>
                             <span className="text-xs text-gray-500">{record.timestamp.toLocaleString()}</span>
                         </div>
                         <p className="text-sm text-gray-700 mt-1">商店: {record.storeName || '未標註'}</p>
@@ -233,7 +247,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
         const renderedVideoHeight = video.offsetHeight;
         const targetCanvasWidth = renderedVideoWidth * 0.75;
         const targetCanvasHeight = renderedVideoHeight * 0.75;
-        const scaleFactor = Math.max(renderedVideoWidth / video.videoWidth, renderedVideoHeight / video.videoHeight);
+        const scaleFactor = Math.max(renderedVideoWidth / video.videoWidth, video.videoHeight / video.videoHeight);
         const scaledIntrinsicWidth = video.videoWidth * scaleFactor;
         const scaledIntrinsicHeight = video.videoHeight * scaleFactor;
         const offsetX = (renderedVideoWidth - scaledIntrinsicWidth) / 2;
@@ -270,12 +284,60 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
         setScanError('');
         try {
             const base64Image = capturedImage.split(',')[1];
-            const systemPrompt = "You are a data extractor. Your sole purpose is to extract information from the provided image and return it in the requested JSON format. Do not use any introductory or explanatory text.";
-            const userPrompt = "分析此產品或價目標籤的影像，並提取所需的結構化資訊。請在 discountDetails 中提供所有相關的促銷訊息，例如買一送一、有效期限等。";
+            
+            const userQuery = "請根據圖片中的標價、產品名稱和規格（質量/容量/數量），以嚴格的 JSON 格式輸出結構化數據。請特別注意計算產品的總容量/總質量。";
+        
+            const newSchema = {
+                type: "OBJECT",
+                properties: {
+                    productName: { "type": "STRING", "description": "產品名稱，例如：家庭號牛奶" },
+                    listedPrice: { "type": "NUMBER", "description": "產品標價（純數字，例如 59）" },
+                    totalCapacity: { "type": "NUMBER", "description": "產品的總容量/總質量/總數量（純數字）。例如：若產品是 '18克10入'，則總容量是 180；若產品是 '2000ml'，則總容量是 2000。" },
+                    baseUnit: { "type": "STRING", "description": "用於計算單價的基礎單位。僅使用 'g' (克), 'ml' (毫升), 或 'pcs' (個/入)。如果是質量，請統一使用 'g'。" }
+                },
+                propertyOrdering: ["productName", "listedPrice", "totalCapacity", "baseUnit"]
+            };
+            
+            const systemPrompt = `
+                你是一個專業的價格數據分析助理。你的任務是從圖像中識別產品名稱、標價以及完整的容量/質量/數量資訊，並將其格式化為嚴格的 JSON 輸出。
+                **計算規則（重要）：**
+                1. 標價 (listedPrice) 必須是純數字。
+                2. 總容量 (totalCapacity) 必須是純數字。
+                3. 如果產品標示為「X 克 Y 入」，**必須**計算總質量： totalCapacity = X * Y。例如：「18克10入」-> 180。
+                4. 如果產品標示為「X 毫升 Y 瓶」，**必須**計算總容量： totalCapacity = X * Y。
+                5. 如果產品標示為「Z 個」，則 totalCapacity = Z。
+                6. 基礎單位 (baseUnit) 必須是 'g', 'ml', 或 'pcs' 之一。質量請用 'g'。
+                請勿輸出任何 JSON 以外的文字、註釋或說明。
+            `;
+
             const apiUrl = `/.netlify/functions/gemini-proxy`;
-            const payload = { systemPrompt, userPrompt, base64Image };
-            const analysisResult = await callGeminiApiWithRetry(payload, apiUrl);
-            onAnalysisSuccess(analysisResult);
+            const payload = { systemPrompt, userPrompt: userQuery, base64Image, responseSchema: newSchema };
+            const analysisResult = await withExponentialBackoff(() => callGeminiApiWithRetry(payload, apiUrl));
+
+            // 計算並添加單價欄位 (從單價計算.txt 複製過來)
+            const { listedPrice, totalCapacity, baseUnit } = analysisResult;
+            let unitPrice = 0;
+            if (listedPrice > 0 && totalCapacity > 0) {
+                 if (baseUnit === 'g' || baseUnit === 'ml') {
+                    unitPrice = (listedPrice / totalCapacity) * 100;
+                } else if (baseUnit === 'pcs') {
+                    unitPrice = listedPrice / totalCapacity;
+                }
+            }
+            
+            // 準備傳遞給父組件的數據，包含計算出的單價
+            const finalData = {
+                scannedBarcode: analysisResult.scannedBarcode || '', // AI 可能不會提供條碼，需要處理
+                productName: analysisResult.productName,
+                extractedPrice: listedPrice.toString(), // 轉換為字串以符合現有狀態
+                storeName: analysisResult.storeName || 'AI 辨識', // 臨時數據：假設此處應有 storeName
+                discountDetails: analysisResult.discountDetails || '',
+                quantity: totalCapacity.toString(), // 轉換為字串以符合現有狀態
+                unitType: baseUnit,
+                unitPrice: unitPrice,
+            };
+
+            onAnalysisSuccess(finalData);
             onClose();
         } catch (error) {
             console.error("AI 分析失敗:", error);
@@ -286,8 +348,46 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
     }, [capturedImage, onAnalysisSuccess, onClose]);
 
     const handleSimulatedAnalysis = () => {
-        const mockResult = { scannedBarcode: '4710123456789', productName: '測試產品名稱', extractedPrice: (Math.random() * 50 + 100).toFixed(0).toString(), storeName: '模擬超商 (AI)', discountDetails: '買二送一優惠 / 限時促銷' };
-        onAnalysisSuccess(mockResult);
+        const randomListedPrice = parseFloat((Math.random() * 50 + 100).toFixed(2));
+        const randomTotalCapacity = Math.floor(Math.random() * 1000) + 100; // 100-1099
+        const unitTypes = ['ml', 'g', 'pcs'];
+        const randomBaseUnit = unitTypes[Math.floor(Math.random() * unitTypes.length)];
+        
+        const mockResult = {
+            productName: '模擬產品名稱',
+            listedPrice: randomListedPrice,
+            totalCapacity: randomTotalCapacity,
+            baseUnit: randomBaseUnit,
+            // 以下是 AI 可能額外提供的資訊，如果 AI 模型能辨識
+            scannedBarcode: '4710123456789',
+            storeName: '模擬超商 (AI)',
+            discountDetails: '買二送一優惠 / 限時促銷',
+        };
+
+        // AIOcrCaptureModal 的 handleAnalyze 函數會處理這個 mockResult
+        // 並計算 unitPrice，然後傳遞給 onAnalysisSuccess
+        const { listedPrice, totalCapacity, baseUnit } = mockResult;
+        let unitPrice = 0;
+        if (listedPrice > 0 && totalCapacity > 0) {
+             if (baseUnit === 'g' || baseUnit === 'ml') {
+                unitPrice = (listedPrice / totalCapacity) * 100;
+            } else if (baseUnit === 'pcs') {
+                unitPrice = listedPrice / totalCapacity;
+            }
+        }
+
+        const finalData = {
+            scannedBarcode: mockResult.scannedBarcode || '',
+            productName: mockResult.productName,
+            extractedPrice: listedPrice.toString(),
+            storeName: mockResult.storeName || 'AI 辨識',
+            discountDetails: mockResult.discountDetails || '',
+            quantity: totalCapacity.toString(),
+            unitType: baseUnit,
+            unitPrice: unitPrice,
+        };
+
+        onAnalysisSuccess(finalData);
         onClose();
     };
 
@@ -553,7 +653,7 @@ function App() {
     }, [statusMessage]);
 
     const handleAiCaptureSuccess = useCallback((result) => {
-        const { scannedBarcode, productName, extractedPrice, storeName, discountDetails } = result;
+        const { scannedBarcode, productName, extractedPrice, storeName, discountDetails, quantity, unitType } = result;
         setOcrResult(result);
         
         const newBarcode = scannedBarcode || '';
@@ -570,33 +670,8 @@ function App() {
         setStoreName(storeName || '');
         setDiscountDetails(discountDetails || '');
 
-        // Attempt to extract quantity and unitType from productName or discountDetails
-        let detectedQuantity = '';
-        let detectedUnitType = 'pcs'; // Default to 'pcs'
-
-        const textToParse = `${productName || ''} ${discountDetails || ''}`;
-
-        // Regex to find numbers followed by units (ml, g, 個, 包, 支, 條, pcs)
-        const unitRegex = /(\d+\.?\d*)\s*(ml|g|個|包|支|條|pcs)/i;
-        const match = textToParse.match(unitRegex);
-
-        if (match) {
-            detectedQuantity = match[1];
-            const unit = match[2].toLowerCase();
-            if (unit === 'ml') detectedUnitType = 'ml';
-            else if (unit === 'g') detectedUnitType = 'g';
-            else detectedUnitType = 'pcs'; // Map all others to 'pcs'
-        } else {
-            // If no specific unit found, try to find a standalone number as quantity
-            const numberRegex = /(\d+\.?\d*)/;
-            const numMatch = textToParse.match(numberRegex);
-            if (numMatch) {
-                detectedQuantity = numMatch[1];
-            }
-        }
-
-        setQuantity(detectedQuantity);
-        setUnitType(detectedUnitType);
+        setQuantity(quantity || ''); // 直接使用從 AI 辨識結果中獲取的 quantity
+        setUnitType(unitType || 'pcs'); // 直接使用從 AI 辨識結果中獲取的 unitType，或預設為 'pcs'
 
         if (productName && newBarcode) {
             setLookupStatus('found');
@@ -663,8 +738,14 @@ function App() {
                 toastStatus = 'success';
                 toastMessage = '這是第一筆紀錄，成功建立！';
             } else {
-                const bestDeal = allRecordsForCompare.reduce((best, cur) => cur.unitPrice < best.unitPrice ? cur : best);
-                isBest = unitPrice <= bestDeal.unitPrice;
+                // 確保 unitPrice 存在且為數字，否則使用 Infinity 進行比較
+                const bestDeal = allRecordsForCompare.reduce((best, cur) => {
+                    const curUnitPrice = cur.unitPrice !== undefined && cur.unitPrice !== null ? cur.unitPrice : Infinity;
+                    const bestUnitPrice = best.unitPrice !== undefined && best.unitPrice !== null ? best.unitPrice : Infinity;
+                    return curUnitPrice < bestUnitPrice ? cur : best;
+                });
+
+                isBest = unitPrice <= (bestDeal.unitPrice !== undefined && bestDeal.unitPrice !== null ? bestDeal.unitPrice : Infinity);
                 bestPrice = bestDeal.unitPrice;
                 bestStore = bestDeal.storeName;
                 
@@ -673,7 +754,7 @@ function App() {
                     toastMessage = '恭喜！這是目前紀錄中的最低標價！';
                 } else {
                     toastStatus = 'warning';
-                    toastMessage = `非最低標價。歷史最低單價為 $${bestDeal.unitPrice.toFixed(2)} (${bestDeal.storeName})`;
+                    toastMessage = `非最低標價。歷史最低單價為 $${(bestDeal.unitPrice || 0).toFixed(2)} (${bestDeal.storeName})`;
                 }
             }
 

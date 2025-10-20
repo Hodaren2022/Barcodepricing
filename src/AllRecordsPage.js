@@ -190,7 +190,12 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
                         >
                             <div className="flex justify-between items-center p-2 bg-gray-50 rounded">
                                 <div>
-                                    <p className="font-medium">{isNaN(record.unitPrice) && isNaN(record.price) ? 'N/A' : `$${(record.unitPrice || record.price || 0).toFixed(2)}`} / {record.quantity || 1} {record.unitType || 'N/A'}</p>
+                                    <p className="font-medium">
+                                        {isNaN(record.price) || isNaN(record.unitPrice) ?
+                                            `$${(record.price || 0).toFixed(2)}@--` :
+                                            `$${record.price}@$${(record.unitPrice || 0).toFixed(2)}`
+                                        }
+                                    </p>
                                     {record.discountDetails && <p className="text-xs text-indigo-600">{record.discountDetails}</p>}
                                 </div>
                                 <div className="text-right">
@@ -438,7 +443,7 @@ function EditModal({ record, onClose, onSave }) {
                 <h2 className="text-xl font-bold mb-4">編輯記錄</h2>
                 <div className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700">總價</label>
+                        <label className="block text-sm font-medium text-gray-700">總價 ($)</label>
                         <input
                             type="number"
                             value={price}

@@ -46,6 +46,7 @@ exports.handler = async (event, context) => {
       }],
       systemInstruction: { parts: [{ text: systemPrompt }] },
       generationConfig: {
+        temperature: 0.1,
         responseMimeType: "application/json",
         responseSchema: {
           type: "OBJECT",

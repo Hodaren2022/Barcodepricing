@@ -267,7 +267,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
         setScanError('');
         try {
             const base64Image = capturedImage.split(',')[1];
-            const systemPrompt = "你是一位專業的價目標籤和收據分析師。請從提供的影像中提取產品條碼（如果可見）、產品名稱、主要售價、商店名稱以及任何詳細的折扣或促銷資訊。請嚴格以 JSON 格式輸出。";
+            const systemPrompt = "You are a data extractor. Your sole purpose is to extract information from the provided image and return it in the requested JSON format. Do not use any introductory or explanatory text.";
             const userPrompt = "分析此產品或價目標籤的影像，並提取所需的結構化資訊。請在 discountDetails 中提供所有相關的促銷訊息，例如買一送一、有效期限等。";
             const apiUrl = `/.netlify/functions/gemini-proxy`;
             const payload = { systemPrompt, userPrompt, base64Image };

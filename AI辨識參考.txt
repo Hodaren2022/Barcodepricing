@@ -21,7 +21,7 @@ const withExponentialBackoff = async (fn, retries = 5, delay = 1000) => {
     }
 };
 
-// **【核心修正 1】** 輔助函數：從字串中提取數字 (例如: "$120.50" -> 120.50)
+// 輔助函數：從字串中提取數字 (例如: "$120.50" -> 120.50)
 const cleanAndParseNumber = (str) => {
     if (typeof str !== 'string' || str === null || str === '') return 0;
     
@@ -34,7 +34,7 @@ const cleanAndParseNumber = (str) => {
     return isNaN(num) ? 0 : num;
 };
 
-// **【核心修正 2】** 輔助函數：從複雜字串計算總容量 (例如: "18克10入" -> 180)
+// 輔助函數：從複雜字串計算總容量 (例如: "18克10入" -> 180)
 const calculateTotalCapacity = (capacityString) => {
     if (typeof capacityString !== 'string') {
         return 0;
@@ -62,7 +62,8 @@ const AIOcrCaptureModal = ({ theme, onAnalysisSuccess, onClose }) => {
     const [imageSrc, setImageSrc] = useState(null);
     const [base64Image, setBase64Image] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [resultData, setResultData] = useState(null);
+    // resultData 現在儲存 AI 傳回的原始純文字
+    const [resultData, setResultData] = useState(null); 
     const [error, setError] = useState(null);
 
     const currentTheme = themeConfig[theme] || themeConfig['blue'];
@@ -94,28 +95,25 @@ const AIOcrCaptureModal = ({ theme, onAnalysisSuccess, onClose }) => {
         setError(null);
         setResultData(null);
 
-        const userQuery = "請根據圖片中的標價、產品名稱和規格（質量/容量/數量），以嚴格的 JSON 格式輸出結構化數據。";
-        
-        // **【核心修正 3】** 將 listedPrice 和 totalCapacity 改為 STRING
-        const newSchema = {
-            type: "OBJECT",
-            properties: {
-                productName: { "type": "STRING", "description": "產品名稱，例如：家庭號牛奶" },
-                listedPrice: { "type": "STRING", "description": "產品標價（保留原始文字，例如: $59.99 或 120元）" },
-                totalCapacity: { "type": "STRING", "description": "產品的總容量/總質量/總數量（保留原始文字，例如: 1.5L 或 18克10入）" },
-                baseUnit: { "type": "STRING", "description": "用於計算單價的基礎單位。僅使用 'g' (克), 'ml' (毫升), 或 'pcs' (個/入)。如果是質量，請統一使用 'g'。" }
-            },
-            propertyOrdering: ["productName", "listedPrice", "totalCapacity", "baseUnit"]
-        };
-        
-        // 系統指令略作調整，以強調辨識原始字串
+        // ----------------------------------------------------------------------
+        // **【核心修正 1】** 系統指令：要求 AI 輸出純文字格式
+        // ----------------------------------------------------------------------
         const systemPrompt = `
-            你是一個專業的價格數據分析助理。你的任務是從圖像中精確識別產品名稱、標價以及完整的容量/質量/數量資訊，並將其格式化為嚴格的 JSON 輸出。
+            你是一個專業的價格數據分析助理。請根據圖像中的標價、產品名稱和規格，僅輸出以下四行資訊，每行使用 '::' 分隔標籤和值。
             **重要規則：**
-            1. listedPrice 和 totalCapacity 字段**必須**保留 AI 辨識到的原始文字，包含貨幣或單位。
-            2. 基礎單位 (baseUnit) 必須是 'g', 'ml', 或 'pcs' 之一。質量請用 'g'。
-            請勿輸出任何 JSON 以外的文字、註釋或說明。
+            1. 不輸出任何 JSON、註釋、Markdown 格式（如星號或井字號）或 JSON 以外的文字。
+            2. listedPrice 必須是 AI 辨識到的原始價格文字，包含貨幣或單位。
+            3. totalCapacity 必須是 AI 辨識到的原始容量/數量文字，包含單位。
+            4. baseUnit 必須是 'g', 'ml', 或 'pcs' 之一。質量請用 'g'。
+            
+            --- 輸出格式（務必精準遵循）---
+            productName::[產品名稱]
+            listedPrice::[原始標價文字]
+            totalCapacity::[原始容量/數量文字]
+            baseUnit::[g, ml 或 pcs]
         `;
+        
+        const userQuery = "請根據這張圖片，提取產品名稱、價格、規格和基礎單位，並使用指定的純文字格式輸出。";
 
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
@@ -135,10 +133,7 @@ const AIOcrCaptureModal = ({ theme, onAnalysisSuccess, onClose }) => {
                 }
             ],
             systemInstruction: { parts: [{ text: systemPrompt }] },
-            generationConfig: {
-                responseMimeType: "application/json",
-                responseSchema: newSchema
-            }
+            // **【核心修正 2】** 移除 JSON 格式強制約束 (generationConfig)
         };
 
         try {
@@ -154,26 +149,35 @@ const AIOcrCaptureModal = ({ theme, onAnalysisSuccess, onClose }) => {
                 return res.json();
             });
 
-            const jsonText = response.candidates?.[0]?.content?.parts?.[0]?.text;
+            const textResponse = response.candidates?.[0]?.content?.parts?.[0]?.text;
             
-            if (jsonText) {
-                let parsedJson;
-                try {
-                    parsedJson = JSON.parse(jsonText);
-                } catch (jsonError) {
-                    console.error("JSON Parsing Failed:", jsonText, jsonError);
-                    setError("AI 回傳的數據格式無效，無法解析 JSON。原始輸出: " + jsonText.substring(0, 50) + "...");
-                    return; // 終止執行，避免使用無效數據
+            if (textResponse) {
+                // **【核心修正 3】** 新的解析邏輯：從純文字中提取數據
+                const lines = textResponse.split('\n').filter(line => line.includes('::'));
+                const parsedData = {};
+
+                lines.forEach(line => {
+                    const [key, value] = line.split('::').map(s => s.trim());
+                    if (key) {
+                        parsedData[key] = value;
+                    }
+                });
+                
+                setResultData(textResponse); // 儲存原始文字響應用於顯示
+
+                // 檢查是否包含所有必須的字段
+                if (!parsedData.listedPrice || !parsedData.totalCapacity || !parsedData.productName || !parsedData.baseUnit) {
+                    setError("AI 分析成功，但未能返回所有關鍵數據（價格、容量、名稱、單位）或格式不符。原始輸出:\n" + textResponse);
+                    setIsLoading(false);
+                    return;
                 }
-
-                setResultData(parsedJson);
-
-                // **【核心修正 4】** 使用輔助函數解析 AI 回傳的字串
+                
+                // 執行客戶端解析與計算
                 const { 
                     listedPrice: priceStr = '0', 
                     totalCapacity: capacityStr = '0', 
                     baseUnit = '' 
-                } = parsedJson;
+                } = parsedData;
                 
                 // 將 AI 回傳的字串安全地轉換為數字
                 const listedPrice = cleanAndParseNumber(priceStr);
@@ -182,23 +186,19 @@ const AIOcrCaptureModal = ({ theme, onAnalysisSuccess, onClose }) => {
 
                 let unitPrice = 0;
                 
-                // 確保價格和容量大於零才進行計算
                 if (listedPrice > 0 && totalCapacity > 0) {
-                    // 價格 / (總容量 / 100) = 每 100 單位價格
                     if (baseUnit === 'g' || baseUnit === 'ml') {
                         unitPrice = (listedPrice / totalCapacity) * 100;
                     } else if (baseUnit === 'pcs') {
-                        // 價格 / 總數量 = 每個單價
                         unitPrice = listedPrice / totalCapacity;
                     }
                 }
                 
-                // 準備傳遞給父組件的數據，包含計算出的單價
+                // 準備傳遞給父組件的最終數據
                 const finalData = {
-                    ...parsedJson,
-                    // 覆蓋原始字串，使用已解析的數字
-                    listedPrice: listedPrice, 
-                    totalCapacity: totalCapacity, 
+                    ...parsedData,
+                    listedPrice: listedPrice, // 傳遞解析後的數字
+                    totalCapacity: totalCapacity, // 傳遞計算後的數字
                     unitPrice: unitPrice,
                     standard: (baseUnit === 'g' || baseUnit === 'ml') ? `每 100${baseUnit}` : `每個`,
                     timestamp: Date.now(),
@@ -207,15 +207,15 @@ const AIOcrCaptureModal = ({ theme, onAnalysisSuccess, onClose }) => {
                 
                 // 檢查最終數據，如果價格或容量依然為 0，則顯示警告
                 if (listedPrice === 0 || totalCapacity === 0) {
-                    setError(`成功解析 JSON，但價格 (${listedPrice}) 或總容量 (${totalCapacity}) 解析失敗，請檢查原始圖片清晰度或 AI 輸出是否為 0/N/A。`);
-                    setIsLoading(false); // 保持 Modal 開啟並顯示錯誤
+                    setError(`AI 辨識成功，但價格 (${listedPrice}) 或總容量 (${totalCapacity}) 提取失敗，請檢查原始圖片清晰度或 AI 原始輸出。`);
+                    setIsLoading(false);
                     return;
                 }
 
                 onAnalysisSuccess(finalData);
 
             } else {
-                setError("AI 分析失敗或未能返回有效的 JSON 數據。");
+                setError("AI 分析失敗或未能返回任何文字數據。");
             }
         } catch (err) {
             console.error("API Call Failed:", err);
@@ -226,7 +226,6 @@ const AIOcrCaptureModal = ({ theme, onAnalysisSuccess, onClose }) => {
         }
     }, [base64Image, onAnalysisSuccess]);
 
-    // ... (useEffect for apiKey remains the same)
 
     return (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-gray-900 bg-opacity-75 flex items-center justify-center p-4">
@@ -288,20 +287,17 @@ const AIOcrCaptureModal = ({ theme, onAnalysisSuccess, onClose }) => {
 
                 {resultData && (
                     <div className={`p-4 rounded-lg bg-${currentTheme.bg} border border-${currentTheme.primary} mb-4`}>
-                        <h3 className="text-lg font-semibold mb-2">分析結果 (原始 JSON)：</h3>
+                        <h3 className="text-lg font-semibold mb-2">分析結果 (原始文字輸出)：</h3>
                         <pre className="text-xs overflow-auto bg-white p-3 rounded-md border border-gray-300">
-                            {JSON.stringify(resultData, null, 2)}
+                            {resultData}
                         </pre>
                         <p className="text-sm mt-2 font-medium text-gray-700">
-                            **解析後的數據：**
+                            **解析後的數字計算：**
                             <span className="block mt-1">
-                                **標價 (已解析):** ${cleanAndParseNumber(resultData.listedPrice).toFixed(2)}
+                                **標價 (已解析):** ${cleanAndParseNumber(resultData).toFixed(2)}
                             </span>
                             <span className="block">
-                                **總容量 (已計算):** {calculateTotalCapacity(resultData.totalCapacity)}
-                            </span>
-                            <span className="block font-bold mt-2">
-                                **計算單價:** ${resultData.unitPrice ? resultData.unitPrice.toFixed(2) : 'N/A'} {resultData.standard ? `(${resultData.standard})` : ''}
+                                **總容量 (已計算):** {calculateTotalCapacity(resultData)}
                             </span>
                         </p>
                     </div>

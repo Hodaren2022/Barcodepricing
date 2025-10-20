@@ -37,12 +37,13 @@ async function callGeminiApiWithRetry(payload, apiUrl, maxRetries = 3) {
             const candidate = result.candidates?.[0];
 
             if (candidate && candidate.content?.parts?.[0]?.text) {
-                const jsonText = candidate.content.parts[0].text;
+                const rawText = candidate.content.parts[0].text;
                 try {
-                    return JSON.parse(jsonText);
+                    return JSON.parse(rawText);
                 } catch (parseError) {
-                    console.error("JSON Parse Error:", jsonText, parseError);
-                    throw new Error("AI 輸出格式錯誤，無法解析 JSON。");
+                    console.warn("JSON Parse Error, returning raw text:", rawText, parseError);
+                    // If JSON parsing fails, return the raw text content
+                    return { rawText: rawText }; 
                 }
             } else {
                 throw new Error("AI 無法生成有效內容。");
@@ -72,43 +73,6 @@ const withExponentialBackoff = async (fn, retries = 5, delay = 1000) => {
             delay *= 2;
         }
     }
-};
-
-// 輔助函數：從字串中提取數字 (例如: "$120.50" -> 120.50)
-const cleanAndParseNumber = (str) => {
-    if (typeof str !== 'string' || str === null || str === '') return 0;
-    
-    // 移除所有非數字、非小數點的字符 (保留負號以防萬一，但價格和容量應是非負的)
-    // 這裡使用更保守的策略，移除貨幣符號和大部分非數字字元，然後解析
-    const cleaned = str.replace(/[^\d.]/g, ''); 
-    const num = parseFloat(cleaned);
-    
-    // 如果解析結果是 NaN (非數字)，則返回 0
-    return isNaN(num) ? 0 : num;
-};
-
-// 輔助函數：從複雜字串計算總容量 (例如: "18克10入" -> 180)
-const calculateTotalCapacity = (capacityString) => {
-    if (typeof capacityString !== 'string') {
-        return 0;
-    }
-    
-    // 步驟 1: 處理複合格式 (X 單位 Y 入/瓶/袋)
-    // 尋找 (數字A) (單位) (數字B) (入/瓶) 或 (數字A) x (數字B) 的模式
-    const complexMatch = capacityString.match(/(\d+\.?\d*)\s*[^x\d]*\s*(\d+)\s*[入瓶袋]/i) ||
-                         capacityString.match(/(\d+\.?\d*)\s*[xX*]\s*(\d+\.?\d*)/);
-
-    if (complexMatch && complexMatch.length >= 3) {
-        // 匹配到 Unit (單位容量/質量) 和 Count (數量)
-        const unit = parseFloat(complexMatch[1]);
-        const count = parseFloat(complexMatch[2]);
-        if (!isNaN(unit) && !isNaN(count)) {
-            return unit * count;
-        }
-    }
-    
-    // 步驟 2: 如果沒有複雜模式，就嘗試解析單一數字 (例如 "2000ml" -> 2000)
-    return cleanAndParseNumber(capacityString);
 };
 
 
@@ -320,8 +284,8 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
                 properties: {
                     scannedBarcode: { "type": "STRING", "description": "影像中找到的 EAN, UPC 或其他產品條碼數字，如果不可見則為空字串。" },
                     productName: { "type": "STRING", "description": "產品名稱，例如：家庭號牛奶" },
-                    listedPrice: { "type": "STRING", "description": "產品標價（保留原始文字，例如: $59.99 或 120元）" },
-                    totalCapacity: { "type": "STRING", "description": "產品的總容量/總質量/總數量（保留原始文字，例如: 1.5L 或 18克10入）" },
+                    listedPrice: { "type": "NUMBER", "description": "產品標價（純數字，例如 59）" },
+                    totalCapacity: { "type": "NUMBER", "description": "產品的總容量/總質量/總數量（純數字）。例如：若產品是 '18克10入'，則總容量是 180；若產品是 '2000ml'，則總容量是 2000。" },
                     baseUnit: { "type": "STRING", "description": "用於計算單價的基礎單位。僅使用 'g' (克), 'ml' (毫升), 或 'pcs' (個/入)。如果是質量，請統一使用 'g'。" },
                     storeName: { "type": "STRING", "description": "價目標籤或收據所示的商店名稱。如果不可見則為空字串。" },
                     discountDetails: { "type": "STRING", "description": "發現的任何促銷或折扣的詳細描述（例如：'買一送一', '第二件半價', '有效期限 2026/01/01'）。如果沒有折扣則為空字串。" }
@@ -330,9 +294,9 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
             };
             
             const systemPrompt = `
-                你是一個專業的價格數據分析助理。你的任務是從圖像中精確識別產品條碼、產品名稱、標價、完整的容量/質量/數量資訊、商店名稱和折扣細節，並將其格式化為嚴格的 JSON 輸出。
-                **重要規則：**
-                1. listedPrice 和 totalCapacity 字段**必須**保留 AI 辨識到的原始文字，包含貨幣或單位。
+                你是一個專業的價格數據分析助理。你的任務是從圖像中識別產品條碼、產品名稱、標價、完整的容量/質量/數量資訊、商店名稱和折扣細節，並將其格式化為嚴格的 JSON 輸出。
+                **計算規則（重要）：**
+                1. 標價 (listedPrice) 必須是純數字。
                 2. 總容量 (totalCapacity) 必須是純數字。
                 3. 如果產品標示為「X 克 Y 入」，**必須**計算總質量： totalCapacity = X * Y。例如：「18克10入」-> 180。
                 4. 如果產品標示為「X 毫升 Y 瓶」，**必須**計算總容量： totalCapacity = X * Y。
@@ -346,24 +310,17 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
             const analysisResult = await withExponentialBackoff(() => callGeminiApiWithRetry(payload, apiUrl));
             console.log("AI Analysis Result:", analysisResult); // Added console.log for debugging
 
-            // 使用輔助函數解析 AI 回傳的字串
+            // 計算並添加單價欄位 (從單價計算.txt 複製過來)
             const { 
                 scannedBarcode = '', 
                 productName = '', 
-                listedPrice: priceStr = '0', 
-                totalCapacity: capacityStr = '0', 
+                listedPrice = 0, 
+                totalCapacity = 0, 
                 baseUnit = 'pcs', 
                 storeName = 'AI 辨識', 
                 discountDetails = '' 
             } = analysisResult;
-
-            // 將 AI 回傳的字串安全地轉換為數字
-            const listedPrice = cleanAndParseNumber(priceStr);
-            // 將 AI 回傳的容量字串安全地計算為總容量數字
-            const totalCapacity = calculateTotalCapacity(capacityStr);
-
             let unitPrice = 0;
-            // 確保價格和容量大於零才進行計算
             if (listedPrice > 0 && totalCapacity > 0) {
                  if (baseUnit === 'g' || baseUnit === 'ml') {
                     unitPrice = (listedPrice / totalCapacity) * 100;
@@ -372,13 +329,6 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
                 }
             }
             
-            // 檢查最終數據，如果價格或容量依然為 0，則顯示警告
-            if (listedPrice === 0 || totalCapacity === 0) {
-                setScanError(`成功解析 AI 數據，但價格 (${listedPrice}) 或總容量 (${totalCapacity}) 解析失敗，請檢查原始圖片清晰度或 AI 輸出是否為 0/N/A。`);
-                setIsAnalyzing(false); // 保持 Modal 開啟並顯示錯誤
-                return;
-            }
-
             // 準備傳遞給父組件的數據，包含計算出的單價
             const finalData = {
                 scannedBarcode: scannedBarcode,
@@ -409,8 +359,8 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
         
         const mockResult = {
             productName: '模擬產品名稱',
-            listedPrice: randomListedPrice.toString(), // Keep as string for new parsing logic
-            totalCapacity: randomTotalCapacity.toString(), // Keep as string for new parsing logic
+            listedPrice: randomListedPrice,
+            totalCapacity: randomTotalCapacity,
             baseUnit: randomBaseUnit,
             // 以下是 AI 可能額外提供的資訊，如果 AI 模型能辨識
             scannedBarcode: '4710123456789',
@@ -420,10 +370,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
 
         // AIOcrCaptureModal 的 handleAnalyze 函數會處理這個 mockResult
         // 並計算 unitPrice，然後傳遞給 onAnalysisSuccess
-        const { listedPrice: priceStr, totalCapacity: capacityStr, baseUnit } = mockResult;
-        const listedPrice = cleanAndParseNumber(priceStr);
-        const totalCapacity = calculateTotalCapacity(capacityStr);
-
+        const { listedPrice, totalCapacity, baseUnit } = mockResult;
         let unitPrice = 0;
         if (listedPrice > 0 && totalCapacity > 0) {
              if (baseUnit === 'g' || baseUnit === 'ml') {
@@ -889,6 +836,16 @@ function App() {
                             <div>數量:</div><div>{ocrResult.quantity || 'N/A'}</div>
                             <div>商店:</div><div>{ocrResult.storeName || 'N/A'}</div>
                             <div>折扣:</div><div>{ocrResult.discountDetails || '無'}</div>
+                        </div>
+                        {ocrResult.rawText && (
+                            <div className="mt-4 p-2 bg-yellow-50 rounded-md text-xs overflow-x-auto">
+                                <h4 className="font-semibold mb-1">原始 AI 回傳文字:</h4>
+                                <pre className="whitespace-pre-wrap"><code>{ocrResult.rawText}</code></pre>
+                            </div>
+                        )}
+                        <div className="mt-4 p-2 bg-yellow-50 rounded-md text-xs overflow-x-auto">
+                            <h4 className="font-semibold mb-1">完整 JSON 數據:</h4>
+                            <pre className="whitespace-pre-wrap"><code>{JSON.stringify(ocrResult, null, 2)}</code></pre>
                         </div>
                         <button onClick={() => setOcrResult(null)} className="mt-3 px-3 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 text-sm">關閉</button>
                     </div>

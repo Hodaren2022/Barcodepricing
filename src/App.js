@@ -237,7 +237,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
                 setScanError("無法播放相機影像。");
             });
         }
-    }, [stream]);
+    }, [stream, resetState]);
 
     const handleCapture = useCallback(() => {
         if (!videoRef.current || !videoRef.current.srcObject) return;

@@ -570,12 +570,40 @@ function App() {
         setStoreName(storeName || '');
         setDiscountDetails(discountDetails || '');
 
+        // Attempt to extract quantity and unitType from productName or discountDetails
+        let detectedQuantity = '';
+        let detectedUnitType = 'pcs'; // Default to 'pcs'
+
+        const textToParse = `${productName || ''} ${discountDetails || ''}`;
+
+        // Regex to find numbers followed by units (ml, g, 個, 包, 支, 條, pcs)
+        const unitRegex = /(\d+\.?\d*)\s*(ml|g|個|包|支|條|pcs)/i;
+        const match = textToParse.match(unitRegex);
+
+        if (match) {
+            detectedQuantity = match[1];
+            const unit = match[2].toLowerCase();
+            if (unit === 'ml') detectedUnitType = 'ml';
+            else if (unit === 'g') detectedUnitType = 'g';
+            else detectedUnitType = 'pcs'; // Map all others to 'pcs'
+        } else {
+            // If no specific unit found, try to find a standalone number as quantity
+            const numberRegex = /(\d+\.?\d*)/;
+            const numMatch = textToParse.match(numberRegex);
+            if (numMatch) {
+                detectedQuantity = numMatch[1];
+            }
+        }
+
+        setQuantity(detectedQuantity);
+        setUnitType(detectedUnitType);
+
         if (productName && newBarcode) {
             setLookupStatus('found');
         } else {
             setLookupStatus('new');
         }
-    }, []);
+    }, [setBarcode, setProductName, setCurrentPrice, setStoreName, setDiscountDetails, setOcrResult, setStatusMessage, setLookupStatus, setQuantity, setUnitType]);
 
     const saveAndComparePrice = useCallback(async (selectedStore) => {
         const finalStoreName = selectedStore || storeName;

@@ -170,7 +170,7 @@ function PriceHistoryDisplay({ historyRecords, theme }) {
                 {formattedRecords.map((record, index) => (
                     <div key={index} className={`p-3 rounded-lg shadow-sm border border-gray-100 ${index === 0 ? theme.light : 'bg-white'}`}>
                         <div className="flex justify-between items-start font-bold">
-                            <span className="text-2xl text-red-600">{isNaN(record.price) || isNaN(record.unitPrice) ? 'N/A' : `$${(record.price || 0).toFixed(2)}@${(record.unitPrice || 0).toFixed(2)}`}</span>
+                            <span className="text-[22px] text-red-600">{`$${(record.price || 0).toFixed(2)} @${isNaN(record.unitPrice) || record.unitPrice === null || record.unitPrice === undefined || record.unitPrice === 0 ? '--' : (record.unitPrice || 0).toFixed(2)}`}</span>
                             <span className="text-xs text-gray-500">{record.timestamp.toLocaleString()}</span>
                         </div>
                         <p className="text-sm text-gray-700 mt-1">商店: {record.storeName || '未標註'}</p>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ArrowLeft, Database, TrendingUp, Edit, Trash2, Save, X, CheckCircle } from 'lucide-react';
-import { collection, getDocs, query, orderBy, where, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 
 // 圖表組件
 const CHART_WIDTH = 400;

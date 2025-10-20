@@ -17,13 +17,13 @@ exports.handler = async (event, context) => {
 
   try {
     // 從前端請求中解析出資料
-    const { systemPrompt, userPrompt, base64Image } = JSON.parse(event.body);
+    const { systemPrompt, userPrompt, base64Image, responseSchema } = JSON.parse(event.body);
 
     // 驗證收到的資料
-    if (!systemPrompt || !userPrompt || !base64Image) {
+    if (!systemPrompt || !userPrompt || !base64Image || !responseSchema) {
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: 'Missing required fields: systemPrompt, userPrompt, or base64Image' }),
+        body: JSON.stringify({ error: 'Missing required fields: systemPrompt, userPrompt, base64Image, or responseSchema' }),
       };
     }
     
@@ -48,17 +48,7 @@ exports.handler = async (event, context) => {
       generationConfig: {
         temperature: 0.1,
         responseMimeType: "application/json",
-        responseSchema: {
-          type: "OBJECT",
-          properties: {
-            "scannedBarcode": { "type": "STRING", "description": "影像中找到的 EAN, UPC 或其他產品條碼數字，如果不可見則為空字串。" },
-            "productName": { "type": "STRING", "description": "產品名稱。如果不可見則為空字串。" },
-            "extractedPrice": { "type": "STRING", "description": "主要售價，格式為乾淨的字串，不帶貨幣符號（例如：'120.5'）。如果找不到價格則為空字串。" },
-            "storeName": { "type": "STRING", "description": "價目標籤或收據所示的商店名稱。如果不可見則為空字串。" },
-            "discountDetails": { "type": "STRING", "description": "發現的任何促銷或折扣的詳細描述（例如：'買一送一', '第二件半價', '有效期限 2026/01/01'）。如果沒有折扣則為空字串。" }
-          },
-          "required": ["scannedBarcode", "productName", "extractedPrice", "storeName", "discountDetails"]
-        }
+        responseSchema: responseSchema
       }
     };
 

@@ -10,14 +10,15 @@ const PADDING = 20;
 function PriceTrendChart({ records, productName }) {
     const validRecords = records.map(r => ({
         ...r,
-        timestamp: r.timestamp?.toDate ? r.timestamp.toDate() : new Date(r.timestamp)
-    })).filter(r => !isNaN(r.price) && r.timestamp).sort((a, b) => a.timestamp - b.timestamp);
+        timestamp: r.timestamp?.toDate ? r.timestamp.toDate() : new Date(r.timestamp),
+        displayPrice: r.unitPrice !== undefined && r.unitPrice !== null ? r.unitPrice : r.price // Use unitPrice if available, else price
+    })).filter(r => !isNaN(r.displayPrice) && r.timestamp).sort((a, b) => a.timestamp - b.timestamp);
 
     if (validRecords.length < 2) {
         return <p className="text-center text-sm text-gray-500">至少需要兩筆紀錄才能繪製趨勢圖。</p>;
     }
 
-    const prices = validRecords.map(r => r.price);
+    const prices = validRecords.map(r => r.displayPrice);
     const minPrice = Math.min(...prices) * 0.95;
     const maxPrice = Math.max(...prices) * 1.05;
     const priceRange = maxPrice - minPrice;
@@ -34,7 +35,7 @@ function PriceTrendChart({ records, productName }) {
     const points = validRecords.map(record => {
         const xRatio = (record.timestamp.getTime() - minTimestamp) / timeRange;
         const x = PADDING + xRatio * (CHART_WIDTH - 2 * PADDING);
-        const yRatio = (record.price - minPrice) / priceRange;
+        const yRatio = (record.displayPrice - minPrice) / priceRange;
         const y = CHART_HEIGHT - PADDING - yRatio * (CHART_HEIGHT - 2 * PADDING);
         return `${x},${y}`;
     }).join(' ');
@@ -43,17 +44,17 @@ function PriceTrendChart({ records, productName }) {
         <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
             <h3 className="text-base font-medium text-gray-700 mb-2 flex items-center">
                 <TrendingUp className="mr-1 text-gray-500" size={16} />
-                價格走勢 - {productName}
+                單價走勢 - {productName}
             </h3>
             <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} className="w-full h-auto" style={{maxWidth: `${CHART_WIDTH}px`}}>
                 <line x1={PADDING} y1={PADDING} x2={PADDING} y2={CHART_HEIGHT - PADDING} stroke="#ddd" strokeWidth="1" />
                 <line x1={PADDING} y1={CHART_HEIGHT - PADDING} x2={CHART_WIDTH - PADDING} y2={CHART_HEIGHT - PADDING} stroke="#ddd" strokeWidth="1" />
-                <text x={PADDING - 5} y={PADDING + 5} textAnchor="end" fontSize="10" fill="#666">${maxPrice.toFixed(0)}</text>
-                <text x={PADDING - 5} y={CHART_HEIGHT - PADDING} textAnchor="end" fontSize="10" fill="#666">${minPrice.toFixed(0)}</text>
+                <text x={PADDING - 5} y={PADDING + 5} textAnchor="end" fontSize="10" fill="#666">${maxPrice.toFixed(2)}</text>
+                <text x={PADDING - 5} y={CHART_HEIGHT - PADDING} textAnchor="end" fontSize="10" fill="#666">${minPrice.toFixed(2)}</text>
                 <polyline fill="none" stroke="#4F46E5" strokeWidth="2" points={points} />
                 {validRecords.map((record, index) => {
                     const [x, y] = points.split(' ')[index].split(',').map(Number);
-                    return <circle key={index} cx={x} cy={y} r="3" fill={index === validRecords.length - 1 ? '#10B981' : '#4F46E5'} title={`${record.price} at ${record.timestamp.toLocaleDateString()}`} />;
+                    return <circle key={index} cx={x} cy={y} r="3" fill={index === validRecords.length - 1 ? '#10B981' : '#4F46E5'} title={`${record.displayPrice.toFixed(2)} at ${record.timestamp.toLocaleDateString()}`} />;
                 })}
             </svg>
             <div className="text-xs text-gray-500 mt-2 flex justify-between px-3">
@@ -151,10 +152,10 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
     const latestRecord = formattedRecords[0];
     if (!latestRecord) return null; // 如果沒有記錄，則不渲染此組件
 
-    const prices = formattedRecords.map(r => r.price);
-    const lowestPrice = Math.min(...prices);
-    const highestPrice = Math.max(...prices);
-    const avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
+    const validUnitPrices = formattedRecords.map(r => r.unitPrice).filter(p => !isNaN(p) && p !== undefined && p !== null);
+    const lowestUnitPrice = validUnitPrices.length > 0 ? Math.min(...validUnitPrices) : 0;
+    const highestUnitPrice = validUnitPrices.length > 0 ? Math.max(...validUnitPrices) : 0;
+    const avgUnitPrice = validUnitPrices.length > 0 ? validUnitPrices.reduce((sum, p) => sum + p, 0) / validUnitPrices.length : 0;
 
     return (
         <div className={`p-4 rounded-xl shadow-lg bg-white border-t-4 ${theme.border} mb-6`}>
@@ -165,15 +166,15 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
                     <p className="text-xs text-gray-500">ID: {product.numericalID}</p>
                 </div>
                 <div className="text-right">
-                    <p className="text-2xl font-bold text-indigo-600">${latestRecord.price.toFixed(2)}</p>
+                    <p className="text-2xl font-bold text-indigo-600">{isNaN(latestRecord.unitPrice) && isNaN(latestRecord.price) ? 'N/A' : `$${(latestRecord.unitPrice || latestRecord.price || 0).toFixed(2)}`}</p>
                     <p className="text-xs text-gray-500">{latestRecord.timestamp.toLocaleDateString()}</p>
                 </div>
             </div>
 
             <div className="grid grid-cols-3 gap-2 my-3 text-center">
-                <div className="bg-green-50 p-2 rounded"><p className="text-xs text-gray-500">最低價</p><p className="font-bold text-green-600">${lowestPrice.toFixed(2)}</p></div>
-                <div className="bg-blue-50 p-2 rounded"><p className="text-xs text-gray-500">平均價</p><p className="font-bold text-blue-600">${avgPrice.toFixed(2)}</p></div>
-                <div className="bg-red-50 p-2 rounded"><p className="text-xs text-gray-500">最高價</p><p className="font-bold text-red-600">${highestPrice.toFixed(2)}</p></div>
+                <div className="bg-green-50 p-2 rounded"><p className="text-xs text-gray-500">最低單價</p><p className="font-bold text-green-600">{isNaN(lowestUnitPrice) ? 'N/A' : `$${lowestUnitPrice.toFixed(2)}`}</p></div>
+                <div className="bg-blue-50 p-2 rounded"><p className="text-xs text-gray-500">平均單價</p><p className="font-bold text-blue-600">{isNaN(avgUnitPrice) ? 'N/A' : `$${avgUnitPrice.toFixed(2)}`}</p></div>
+                <div className="bg-red-50 p-2 rounded"><p className="text-xs text-gray-500">最高單價</p><p className="font-bold text-red-600">{isNaN(highestUnitPrice) ? 'N/A' : `$${highestUnitPrice.toFixed(2)}`}</p></div>
             </div>
 
             <div className="mb-4"><PriceTrendChart records={formattedRecords} productName={product.productName} /></div>
@@ -189,7 +190,7 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
                         >
                             <div className="flex justify-between items-center p-2 bg-gray-50 rounded">
                                 <div>
-                                    <p className="font-medium">${record.price.toFixed(2)}</p>
+                                    <p className="font-medium">{isNaN(record.unitPrice) && isNaN(record.price) ? 'N/A' : `$${(record.unitPrice || record.price || 0).toFixed(2)}`} / {record.quantity || 1} {record.unitType || 'N/A'}</p>
                                     {record.discountDetails && <p className="text-xs text-indigo-600">{record.discountDetails}</p>}
                                 </div>
                                 <div className="text-right">
@@ -398,10 +399,37 @@ function AllRecordsPage({ theme, onBack, db }) {
 
 function EditModal({ record, onClose, onSave }) {
     const [price, setPrice] = useState(record.price);
+    const [quantity, setQuantity] = useState(record.quantity || '');
+    const [unitType, setUnitType] = useState(record.unitType || 'pcs');
     const [discount, setDiscount] = useState(record.discountDetails || '');
 
+    const calculateUnitPrice = useCallback(() => {
+        const p = parseFloat(price);
+        const q = parseFloat(quantity);
+        if (!isNaN(p) && !isNaN(q) && q > 0) {
+            if (unitType === 'g' || unitType === 'ml') {
+                return (p / q) * 100;
+            } else { // For 'pcs' and any other unit
+                return p / q;
+            }
+        }
+        return null;
+    }, [price, quantity, unitType]);
+
     const handleSave = () => {
-        onSave({ ...record, price: parseFloat(price), discountDetails: discount });
+        const newUnitPrice = calculateUnitPrice();
+        if (newUnitPrice === null) {
+            alert("請輸入有效的價格和數量。");
+            return;
+        }
+        onSave({ 
+            ...record, 
+            price: parseFloat(price),
+            quantity: parseFloat(quantity),
+            unitType: unitType,
+            unitPrice: newUnitPrice,
+            discountDetails: discount 
+        });
     };
 
     return (
@@ -410,12 +438,42 @@ function EditModal({ record, onClose, onSave }) {
                 <h2 className="text-xl font-bold mb-4">編輯記錄</h2>
                 <div className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700">價格</label>
+                        <label className="block text-sm font-medium text-gray-700">總價</label>
                         <input
                             type="number"
                             value={price}
                             onChange={(e) => setPrice(e.target.value)}
                             className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">數量</label>
+                        <input
+                            type="number"
+                            value={quantity}
+                            onChange={(e) => setQuantity(e.target.value)}
+                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">單位</label>
+                        <select
+                            value={unitType}
+                            onChange={(e) => setUnitType(e.target.value)}
+                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                            <option value="ml">ml (毫升)</option>
+                            <option value="g">g (克)</option>
+                            <option value="pcs">pcs (個/包/支/條)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">單價 (自動計算)</label>
+                        <input
+                            type="text"
+                            value={isNaN(calculateUnitPrice()) ? 'N/A' : calculateUnitPrice().toFixed(2)}
+                            readOnly
+                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-gray-100"
                         />
                     </div>
                     <div>

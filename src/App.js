@@ -72,14 +72,15 @@ const PADDING = 20;
 function PriceTrendChart({ records, theme }) {
     const validRecords = records.map(r => ({
         ...r,
-        timestamp: r.timestamp?.toDate ? r.timestamp.toDate() : new Date(r.timestamp)
-    })).filter(r => !isNaN(r.price) && r.timestamp);
+        timestamp: r.timestamp?.toDate ? r.timestamp.toDate() : new Date(r.timestamp),
+        displayPrice: r.unitPrice !== undefined && r.unitPrice !== null ? r.unitPrice : r.price // Use unitPrice if available, else price
+    })).filter(r => !isNaN(r.displayPrice) && r.timestamp);
 
     if (validRecords.length < 2) {
         return <p className="text-center text-sm text-gray-500">至少需要兩筆紀錄才能繪製趨勢圖。</p>;
     }
 
-    const prices = validRecords.map(r => r.price);
+    const prices = validRecords.map(r => r.displayPrice);
     const minPrice = Math.min(...prices) * 0.95;
     const maxPrice = Math.max(...prices) * 1.05;
     const priceRange = maxPrice - minPrice;
@@ -96,7 +97,7 @@ function PriceTrendChart({ records, theme }) {
     const points = validRecords.map(record => {
         const xRatio = (record.timestamp.getTime() - minTimestamp) / timeRange;
         const x = PADDING + xRatio * (CHART_WIDTH - 2 * PADDING);
-        const yRatio = (record.price - minPrice) / priceRange;
+        const yRatio = (record.displayPrice - minPrice) / priceRange;
         const y = CHART_HEIGHT - PADDING - yRatio * (CHART_HEIGHT - 2 * PADDING);
         return `${x},${y}`;
     }).join(' ');
@@ -105,17 +106,17 @@ function PriceTrendChart({ records, theme }) {
         <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
             <h3 className="text-base font-medium text-gray-700 mb-2 flex items-center">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1 text-gray-500"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-                價格走勢
+                單價走勢
             </h3>
             <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} className="w-full h-auto" style={{maxWidth: `${CHART_WIDTH}px`}}>
                 <line x1={PADDING} y1={PADDING} x2={PADDING} y2={CHART_HEIGHT - PADDING} stroke="#ddd" strokeWidth="1" />
                 <line x1={PADDING} y1={CHART_HEIGHT - PADDING} x2={CHART_WIDTH - PADDING} y2={CHART_HEIGHT - PADDING} stroke="#ddd" strokeWidth="1" />
-                <text x={PADDING - 5} y={PADDING + 5} textAnchor="end" fontSize="10" fill="#666">${maxPrice.toFixed(0)}</text>
-                <text x={PADDING - 5} y={CHART_HEIGHT - PADDING} textAnchor="end" fontSize="10" fill="#666">${minPrice.toFixed(0)}</text>
+                <text x={PADDING - 5} y={PADDING + 5} textAnchor="end" fontSize="10" fill="#666">${maxPrice.toFixed(2)}</text>
+                <text x={PADDING - 5} y={CHART_HEIGHT - PADDING} textAnchor="end" fontSize="10" fill="#666">${minPrice.toFixed(2)}</text>
                 <polyline fill="none" stroke={theme.color === 'red' ? '#EF4444' : '#4F46E5'} strokeWidth="2" points={points} />
                 {validRecords.map((record, index) => {
                     const [x, y] = points.split(' ')[index].split(',').map(Number);
-                    return <circle key={index} cx={x} cy={y} r="3" fill={index === 0 ? '#10B981' : theme.primary.split('-')[1]} title={`$${record.price}`} />;
+                    return <circle key={index} cx={x} cy={y} r="3" fill={index === 0 ? '#10B981' : theme.primary.split('-')[1]} title={`$${record.displayPrice.toFixed(2)}`} />;
                 })}
             </svg>
             <div className="text-xs text-gray-500 mt-2 flex justify-between px-3">
@@ -133,7 +134,8 @@ function PriceHistoryDisplay({ historyRecords, theme }) {
 
     const formattedRecords = historyRecords.map(record => ({
         ...record,
-        timestamp: record.timestamp?.toDate ? record.timestamp.toDate() : new Date(record.timestamp)
+        timestamp: record.timestamp?.toDate ? record.timestamp.toDate() : new Date(record.timestamp),
+        displayPrice: record.unitPrice !== undefined && record.unitPrice !== null ? record.unitPrice : record.price // Use unitPrice if available, else price
     }));
 
     return (
@@ -144,10 +146,11 @@ function PriceHistoryDisplay({ historyRecords, theme }) {
                 {formattedRecords.map((record, index) => (
                     <div key={index} className={`p-3 rounded-lg shadow-sm border border-gray-100 ${index === 0 ? theme.light : 'bg-white'}`}>
                         <div className="flex justify-between items-start font-bold">
-                            <span className="text-2xl text-red-600">${record.price.toFixed(2)}</span>
+                            <span className="text-2xl text-red-600">{isNaN(record.displayPrice) || record.displayPrice === null ? 'N/A' : `$${record.displayPrice.toFixed(2)}`}</span>
                             <span className="text-xs text-gray-500">{record.timestamp.toLocaleString()}</span>
                         </div>
                         <p className="text-sm text-gray-700 mt-1">商店: {record.storeName || '未標註'}</p>
+                        {record.quantity && record.unitType && <p className="text-xs text-gray-600">數量: {record.quantity} {record.unitType} (總價: ${(record.price || 0).toFixed(2)})</p>}
                         {record.discountDetails && <p className="text-xs text-indigo-600 italic">優惠: {record.discountDetails}</p>}
                         {index === 0 && <span className={`text-xs font-semibold px-2 py-0.5 rounded-full text-white ${theme.primary}`}>最新紀錄</span>}
                     </div>
@@ -408,10 +411,15 @@ function App() {
     const { userId, isAuthReady, currentTheme, saveUserTheme } = useFirebaseAuthentication();
     const streamRef = useRef(null);
     
+    const [saveResultToast, setSaveResultToast] = useState(null);
+
     // UI 狀態
     const [barcode, setBarcode] = useState('');
     const [productName, setProductName] = useState('');
     const [currentPrice, setCurrentPrice] = useState('');
+    const [quantity, setQuantity] = useState('');
+    const [unitType, setUnitType] = useState('pcs'); // 'g', 'ml', 'pcs'
+    const [unitPrice, setUnitPrice] = useState(null);
     const [discountDetails, setDiscountDetails] = useState('');
     const [storeName, setStoreName] = useState('');
     const [productHistory, setProductHistory] = useState([]);
@@ -427,12 +435,29 @@ function App() {
     const [currentPage, setCurrentPage] = useState('main');
     const [ocrResult, setOcrResult] = useState(null);
 
-    const [saveResultToast, setSaveResultToast] = useState(null);
+    useEffect(() => {
+        const price = parseFloat(currentPrice);
+        const qty = parseFloat(quantity);
 
+        if (!isNaN(price) && !isNaN(qty) && qty > 0) {
+            let calculatedUnitPrice;
+            if (unitType === 'g' || unitType === 'ml') {
+                calculatedUnitPrice = (price / qty) * 100;
+            } else { // For 'pcs' and any other unit
+                calculatedUnitPrice = price / qty;
+            }
+            setUnitPrice(calculatedUnitPrice);
+        } else {
+            setUnitPrice(null);
+        }
+    }, [currentPrice, quantity, unitType]);
     const clearForm = useCallback(() => {
         setBarcode('');
         setProductName('');
         setCurrentPrice('');
+        setQuantity('');
+        setUnitType('pcs'); // Reset to default unit type
+        setUnitPrice(null);
         setDiscountDetails('');
         setStoreName('');
         setProductHistory([]);
@@ -557,8 +582,8 @@ function App() {
         const numericalID = djb2Hash(barcode);
         const priceValue = parseFloat(currentPrice);
 
-        if (!userId || !barcode || !productName || isNaN(priceValue)) {
-            setSaveResultToast({ status: 'error', message: '請確保已輸入條碼、產品名稱和有效價格！', productName: productName || "未知產品" });
+        if (!userId || !barcode || !productName || isNaN(priceValue) || isNaN(parseFloat(quantity)) || parseFloat(quantity) <= 0 || unitPrice === null) {
+            setSaveResultToast({ status: 'error', message: '請確保已輸入條碼、產品名稱、有效總價、數量和單位！', productName: productName || "未知產品" });
             return;
         }
         if (!finalStoreName.trim()) {
@@ -585,7 +610,10 @@ function App() {
                 numericalID,
                 productName,
                 storeName: finalStoreName,
-                price: priceValue,
+                price: priceValue, // 總價
+                quantity: parseFloat(quantity),
+                unitType: unitType,
+                unitPrice: unitPrice, // 單價
                 discountDetails: discountDetails || '',
                 timestamp: serverTimestamp(),
                 recordedBy: userId,
@@ -594,7 +622,7 @@ function App() {
             
             const recordsQuery = query(collection(db, "priceRecords"), where("numericalID", "==", numericalID));
             const recordsSnap = await getDocs(recordsQuery);
-            const records = recordsSnap.docs.map(doc => doc.data());
+            const records = recordsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             
             const allRecordsForCompare = [...records, { ...priceRecord, timestamp: new Date() }];
 
@@ -602,14 +630,14 @@ function App() {
 
             if (allRecordsForCompare.length <= 1) {
                 isBest = true;
-                bestPrice = priceValue;
+                bestPrice = unitPrice;
                 bestStore = finalStoreName;
                 toastStatus = 'success';
                 toastMessage = '這是第一筆紀錄，成功建立！';
             } else {
-                const bestDeal = allRecordsForCompare.reduce((best, cur) => cur.price < best.price ? cur : best);
-                isBest = priceValue <= bestDeal.price;
-                bestPrice = bestDeal.price;
+                const bestDeal = allRecordsForCompare.reduce((best, cur) => cur.unitPrice < best.unitPrice ? cur : best);
+                isBest = unitPrice <= bestDeal.unitPrice;
+                bestPrice = bestDeal.unitPrice;
                 bestStore = bestDeal.storeName;
                 
                 if (isBest) {
@@ -617,7 +645,7 @@ function App() {
                     toastMessage = '恭喜！這是目前紀錄中的最低標價！';
                 } else {
                     toastStatus = 'warning';
-                    toastMessage = `非最低標價。歷史最低為 $${bestDeal.price} (${bestDeal.storeName})`;
+                    toastMessage = `非最低標價。歷史最低單價為 $${bestDeal.unitPrice.toFixed(2)} (${bestDeal.storeName})`;
                 }
             }
 
@@ -632,7 +660,7 @@ function App() {
         } finally {
             setIsLoading(false);
         }
-    }, [userId, barcode, productName, currentPrice, discountDetails, storeName, lookupProduct]);
+    }, [userId, barcode, productName, currentPrice, discountDetails, storeName, lookupProduct, quantity, unitType, unitPrice, setSaveResultToast, setComparisonResult, setIsLoading, setIsStoreSelectorOpen]);
 
     const handleStoreSelect = useCallback((selectedStore) => {
         setStoreName(selectedStore);
@@ -717,7 +745,7 @@ function App() {
                     </div>
                     <div className="grid grid-cols-2 gap-4 mb-4">
                         <div>
-                            <label className="block text-gray-700 font-medium mb-1">標價 ($) <span className="text-red-500">*</span></label>
+                            <label className="block text-gray-700 font-medium mb-1">總價 ($) <span className="text-red-500">*</span></label>
                             <input type="number" value={currentPrice} onChange={(e) => setCurrentPrice(e.target.value)} placeholder="AI 擷取" className="w-full p-3 border border-gray-300 rounded-lg" />
                         </div>
                         <div>
@@ -730,6 +758,24 @@ function App() {
                                 placeholder="點擊選擇商店"
                                 className="w-full p-3 border border-gray-300 rounded-lg bg-gray-50 cursor-pointer"
                             />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 mb-4">
+                        <div>
+                            <label className="block text-gray-700 font-medium mb-1">數量 <span className="text-red-500">*</span></label>
+                            <input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="例如: 500" className="w-full p-3 border border-gray-300 rounded-lg" />
+                        </div>
+                        <div>
+                            <label className="block text-gray-700 font-medium mb-1">單位 <span className="text-red-500">*</span></label>
+                            <select value={unitType} onChange={(e) => setUnitType(e.target.value)} className="w-full p-3 border border-gray-300 rounded-lg">
+                                <option value="ml">ml (毫升)</option>
+                                <option value="g">g (克)</option>
+                                <option value="pcs">pcs (個/包/支/條)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-gray-700 font-medium mb-1">單價 (每100g/ml)</label>
+                            <input type="text" value={unitPrice ? unitPrice.toFixed(2) : '-'} readOnly className="w-full p-3 border border-gray-300 rounded-lg bg-gray-100" />
                         </div>
                     </div>
                     <div className="mb-6">

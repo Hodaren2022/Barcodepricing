@@ -646,7 +646,7 @@ function App() {
             setLookupStatus('ready');
             setProductHistory([]);
         }
-    }, []);
+    }, [db, setProductName, setLookupStatus, setProductHistory, setStatusMessage, generateProductId]);
 
     useEffect(() => {
         if (isAuthReady) { // Only run if auth is ready

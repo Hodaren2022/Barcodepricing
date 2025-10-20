@@ -1,16 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { X } from 'lucide-react';
 import { db } from './firebase-config';
-import { collection, getDocs, addDoc, query, where, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, query, where, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 
 const initialStores = [
-    { name: "全聯", sort: 1 }, 
-    { name: "大全聯", sort: 1.5 }, // <-- 新增
-    { name: "家樂福", sort: 2 }, 
-    { name: "7-11", sort: 3 }, { name: "全家", sort: 4 },
-    { name: "萊爾富", sort: 5 }, { name: "好市多", sort: 6 }, 
-    { name: "屈臣氏", sort: 7 }, { name: "康是美", sort: 8 },
-    { name: "美廉社", sort: 9 }, { name: "愛買", sort: 10 },
+    { name: "全聯", sort: 1 },
+    { name: "大全聯", sort: 2 },
+    { name: "家樂福", sort: 3 },
+    { name: "7-11", sort: 4 }, 
+    { name: "全家", sort: 5 },
+    { name: "萊爾富", sort: 6 }, 
+    { name: "好市多", sort: 7 }, 
+    { name: "屈臣氏", sort: 8 }, 
+    { name: "康是美", sort: 9 },
+    { name: "美廉社", sort: 10 }, 
+    { name: "愛買", sort: 11 },
     { name: "其他", sort: 999 }
 ];
 
@@ -32,6 +36,29 @@ function StoreSelector({ theme, onSelect, onClose }) {
                 );
                 await Promise.all(batch);
                 querySnapshot = await getDocs(storesCollection);
+            } else {
+                // --- Start of new migration logic ---
+                const storesFromDb = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                const updates = [];
+
+                for (const initialStore of initialStores) {
+                    const dbStore = storesFromDb.find(s => s.name === initialStore.name);
+                    // If the store exists in DB but the sort order is different from the code
+                    if (dbStore && dbStore.sort !== initialStore.sort) {
+                        const storeRef = doc(db, 'stores', dbStore.id);
+                        updates.push(updateDoc(storeRef, { sort: initialStore.sort }));
+                    }
+                }
+
+                // If there are any updates to perform
+                if (updates.length > 0) {
+                    console.log(`Updating sort order for ${updates.length} stores...`);
+                    await Promise.all(updates);
+                    // Re-fetch the data after updates to ensure we have the latest version
+                    querySnapshot = await getDocs(storesCollection);
+                    console.log("Store sort order updated successfully.");
+                }
+                // --- End of new migration logic ---
             }
 
             const storesList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));

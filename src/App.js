@@ -2,19 +2,14 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { PaintBucket, DollarSign, Barcode, ClipboardCheck, X, Camera, Zap, FileText, RotateCcw, Database } from 'lucide-react';
 import AllRecordsPage from './AllRecordsPage';
 import StoreSelector from './StoreSelector';
-import { db } from './firebase-config'; // <-- 引入 Firebase
+import { db } from './firebase-config.js'; // <-- 引入 Firebase
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, orderBy, serverTimestamp } from "firebase/firestore";
 
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 // 1. 核心設定與工具函數 (Core Setup & Utilities)
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 
-/**
- * DJB2 雜湊算法：將條碼字串轉換為數值 ID (numericalID)。
- * @param {string} str - 原始條碼字串
- * @returns {number} - 32位元無符號整數
- */
 function djb2Hash(str) {
     let hash = 5381;
     for (let i = 0; i < str.length; i++) {
@@ -23,11 +18,7 @@ function djb2Hash(str) {
     return hash >>> 0;
 }
 
-/**
- * 指數退避 (Exponential Backoff) 執行 API 呼叫
- */
 async function callGeminiApiWithRetry(payload, apiUrl, maxRetries = 3) {
-    // ... (此函數保持不變)
     let lastError = null;
     for (let i = 0; i < maxRetries; i++) {
         try {
@@ -70,9 +61,9 @@ async function callGeminiApiWithRetry(payload, apiUrl, maxRetries = 3) {
 }
 
 
-// -----------------------------------------------------------------------------
-// 2. UI 元件 (PriceTrendChart, PriceHistoryDisplay, etc.)
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// 2. UI 元件 (UI Components)
+// ----------------------------------------------------------------------------
 
 const CHART_WIDTH = 400;
 const CHART_HEIGHT = 150;
@@ -81,7 +72,6 @@ const PADDING = 20;
 function PriceTrendChart({ records, theme }) {
     const validRecords = records.map(r => ({
         ...r,
-        // 確保 timestamp 是 JS Date 物件
         timestamp: r.timestamp?.toDate ? r.timestamp.toDate() : new Date(r.timestamp)
     })).filter(r => !isNaN(r.price) && r.timestamp);
 
@@ -136,13 +126,11 @@ function PriceTrendChart({ records, theme }) {
     );
 }
 
-
 function PriceHistoryDisplay({ historyRecords, theme }) {
     if (historyRecords.length === 0) {
         return <div className="text-center p-6 text-gray-500 bg-white rounded-xl shadow-md">尚無歷史價格紀錄。</div>;
     }
 
-    // 將 Firestore timestamp 轉換為 JS Date
     const formattedRecords = historyRecords.map(record => ({
         ...record,
         timestamp: record.timestamp?.toDate ? record.timestamp.toDate() : new Date(record.timestamp)
@@ -169,7 +157,6 @@ function PriceHistoryDisplay({ historyRecords, theme }) {
     );
 }
 
-// ... (ThemeSelector and AIOcrCaptureModal remain unchanged)
 const THEMES = {
     'Default (Indigo)': { primary: 'bg-indigo-600', light: 'bg-indigo-100', hover: 'hover:bg-indigo-700', border: 'border-indigo-600', text: 'text-indigo-600', color: 'indigo' },
     '海洋藍 (Ocean Blue)': { primary: 'bg-blue-600', light: 'bg-blue-100', hover: 'hover:bg-blue-700', border: 'border-blue-600', text: 'text-blue-600', color: 'blue' },
@@ -212,46 +199,28 @@ function ThemeSelector({ theme, saveTheme, onClose }) {
     );
 }
 
-function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
+function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
     const videoRef = useRef(null);
-    const streamRef = useRef(null);
-    const [isCameraOn, setIsCameraOn] = useState(false);
     const [scanError, setScanError] = useState('');
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [capturedImage, setCapturedImage] = useState(null);
 
-    const stopCamera = useCallback(() => {
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-        }
-        if (videoRef.current) { videoRef.current.srcObject = null; }
-        setIsCameraOn(false);
-    }, []);
-
-    const startCamera = useCallback(async () => {
+    const resetState = () => {
         setScanError('');
         setCapturedImage(null);
-        setIsCameraOn(true);
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } });
-            streamRef.current = stream;
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-                await videoRef.current.play();
-            }
-        } catch (err) {
-            console.error("無法存取攝影機:", err);
-            setScanError(`無法存取攝影機或權限被拒絕。請檢查瀏覽器設定。 (${err.name} - ${err.message})`);
-            setIsCameraOn(false);
-        }
-    }, []);
+        setIsAnalyzing(false);
+    };
 
     useEffect(() => {
-        startCamera();
-        return () => stopCamera();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+        resetState();
+        if (stream && videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.play().catch(err => {
+                console.error("Video play failed:", err);
+                setScanError("無法播放相機影像。");
+            });
+        }
+    }, [stream]);
 
     const handleCapture = useCallback(() => {
         if (!videoRef.current || !videoRef.current.srcObject) return;
@@ -277,9 +246,20 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, sWidth, sHeight);
         const base64Data = canvas.toDataURL('image/jpeg', 0.9);
-        stopCamera();
         setCapturedImage(base64Data);
-    }, [stopCamera]);
+        
+        // Stop video playback after capture
+        if (videoRef.current) {
+            videoRef.current.pause();
+        }
+    }, []);
+
+    const handleRetake = () => {
+        resetState();
+        if (videoRef.current) {
+            videoRef.current.play().catch(err => console.error("Video play failed:", err));
+        }
+    };
 
     const handleAnalyze = useCallback(async () => {
         if (!capturedImage) { setScanError("沒有可分析的影像。"); return; }
@@ -316,25 +296,25 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 transform transition-all flex flex-col items-center">
                 <header className="flex justify-between items-center w-full mb-4 border-b pb-2">
                     <h3 className={`text-xl font-bold ${theme.text} flex items-center`}><Zap className="inline-block w-5 h-5 mr-2" />AI 視覺擷取與分析</h3>
-                    <button onClick={() => { stopCamera(); onClose(); }} className="p-1 rounded-full text-gray-500 hover:text-gray-900"><X className="w-6 h-6" /></button>
+                    <button onClick={onClose} className="p-1 rounded-full text-gray-500 hover:text-gray-900"><X className="w-6 h-6" /></button>
                 </header>
                 {isAnalyzing && <div className={`w-full p-4 mb-4 rounded-lg bg-yellow-100 text-yellow-800 flex items-center justify-center`}>...分析中...</div>}
                 {scanError ? <div className="text-red-600 bg-red-100 p-4 rounded-lg w-full mb-4 text-center">{scanError}</div> : (
                     <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden mb-4 border-4 border-dashed border-white">
                         {capturedImage ? <img src={capturedImage} alt="Captured" className="w-full h-full object-cover" /> : <video ref={videoRef} className="w-full h-full object-cover" playsInline muted></video>}
-                        {isCameraOn && <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="w-[75%] h-[75%] border-4 border-yellow-400 border-opacity-75 rounded-lg shadow-lg"></div></div>}
+                        {!capturedImage && <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="w-[75%] h-[75%] border-4 border-yellow-400 border-opacity-75 rounded-lg shadow-lg"></div></div>}
                     </div>
                 )}
                 <div className="w-full">
-                    {!capturedImage && isCameraOn && !scanError && <button onClick={handleCapture} className={`w-full p-3 mb-3 rounded-lg text-white font-semibold shadow-lg transition-all ${themePrimary} ${themeHover} flex items-center justify-center`} disabled={isAnalyzing}><Camera className="w-5 h-5 mr-2" />擷取畫面</button>}
+                    {!capturedImage && !scanError && <button onClick={handleCapture} className={`w-full p-3 mb-3 rounded-lg text-white font-semibold shadow-lg transition-all ${themePrimary} ${themeHover} flex items-center justify-center`} disabled={isAnalyzing}><Camera className="w-5 h-5 mr-2" />擷取畫面</button>}
                     {capturedImage && !scanError && (
                         <div className="grid grid-cols-2 gap-4 mb-3">
-                            <button onClick={startCamera} className="w-full p-3 rounded-lg bg-gray-500 hover:bg-gray-600 text-white font-semibold shadow-lg transition-all flex items-center justify-center" disabled={isAnalyzing}>重新拍攝</button>
+                            <button onClick={handleRetake} className="w-full p-3 rounded-lg bg-gray-500 hover:bg-gray-600 text-white font-semibold shadow-lg transition-all flex items-center justify-center" disabled={isAnalyzing}>重新拍攝</button>
                             <button onClick={handleAnalyze} className={`w-full p-3 rounded-lg text-white font-semibold shadow-lg transition-all ${themePrimary} ${themeHover} flex items-center justify-center`} disabled={isAnalyzing}><Zap className="w-5 h-5 mr-2" />開始 AI 分析</button>
                         </div>
                     )}
                     <button onClick={handleSimulatedAnalysis} className="w-full p-3 mb-3 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-lg transition-all" disabled={isAnalyzing}>模擬 AI 分析成功 (測試用)</button>
-                    <button onClick={() => { stopCamera(); onClose(); }} className="w-full p-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg shadow-lg transition-all" disabled={isAnalyzing}>關閉</button>
+                    <button onClick={onClose} className="w-full p-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg shadow-lg transition-all" disabled={isAnalyzing}>關閉</button>
                 </div>
             </div>
         </div>
@@ -342,9 +322,9 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose }) {
 }
 
 
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 // 3. Firebase 身份驗證與主題設定 (Firebase Auth & Theming)
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 
 function useFirebaseAuthentication() {
     const [userId, setUserId] = useState(null);
@@ -359,7 +339,6 @@ function useFirebaseAuthentication() {
             })
             .catch((error) => {
                 console.error("Firebase 匿名登入失敗:", error);
-                // 可在此處加入更複雜的錯誤處理
             });
     }, []);
 
@@ -376,13 +355,58 @@ function useFirebaseAuthentication() {
     return { userId, isAuthReady, currentTheme, saveUserTheme };
 }
 
+// ----------------------------------------------------------------------------
+// 4. 結果提示框 (Result Toast)
+// ----------------------------------------------------------------------------
+function SaveResultToast({ result, onClose }) {
+    useEffect(() => {
+        let timer;
+        if (result) {
+            timer = setTimeout(onClose, 5000);
+        }
+        return () => clearTimeout(timer);
+    }, [result, onClose]);
 
-// -----------------------------------------------------------------------------
-// 4. 主應用程式元件 (App Component)
-// -----------------------------------------------------------------------------
+    if (!result) {
+        return null;
+    }
+
+    const { status, message, productName } = result;
+
+    const theme = {
+        success: { bg: 'bg-green-500', text: 'text-white', icon: <ClipboardCheck className="w-6 h-6 mr-3" /> },
+        warning: { bg: 'bg-yellow-400', text: 'text-gray-800', icon: <DollarSign className="w-6 h-6 mr-3" /> },
+        error: { bg: 'bg-red-500', text: 'text-white', icon: <X className="w-6 h-6 mr-3" /> },
+    };
+
+    const currentTheme = theme[status];
+
+    return (
+        <div className={`fixed top-20 left-1/2 -translate-x-1/2 max-w-md w-full p-4 rounded-xl shadow-2xl z-[100] ${currentTheme.bg} ${currentTheme.text} transition-all duration-300 ease-in-out`}>
+            <div className="flex items-center">
+                {currentTheme.icon}
+                <div className="flex-grow">
+                    <p className="font-bold text-lg">{productName}</p>
+                    <p className="text-sm">{message}</p>
+                    <p className="text-sm font-semibold mt-1">
+                        資料儲存: {status === 'error' ? '失敗' : '成功'} | 
+                        比價結果: {status === 'success' ? '是最低價' : (status === 'warning' ? '非最低價' : 'N/A')}
+                    </p>
+                </div>
+                <button onClick={onClose} className="ml-4 p-1 rounded-full hover:bg-white/20"><X className="w-5 h-5" /></button>
+            </div>
+        </div>
+    );
+}
+
+
+// ----------------------------------------------------------------------------
+// 5. 主應用程式元件 (App Component)
+// ----------------------------------------------------------------------------
 
 function App() {
     const { userId, isAuthReady, currentTheme, saveUserTheme } = useFirebaseAuthentication();
+    const streamRef = useRef(null);
     
     // UI 狀態
     const [barcode, setBarcode] = useState('');
@@ -394,22 +418,65 @@ function App() {
     const [comparisonResult, setComparisonResult] = useState({ message: '等待比價數據...' });
     const [statusMessage, setStatusMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [lookupStatus, setLookupStatus] = useState('ready'); // ready, searching, found, new
+    const [lookupStatus, setLookupStatus] = useState('ready');
     
     // Modal and Page 狀態
     const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
     const [isCaptureModalOpen, setIsCaptureModalOpen] = useState(false);
     const [isStoreSelectorOpen, setIsStoreSelectorOpen] = useState(false);
-    const [currentPage, setCurrentPage] = useState('main'); // 'main' or 'allRecords'
+    const [currentPage, setCurrentPage] = useState('main');
     const [ocrResult, setOcrResult] = useState(null);
 
-    // -----------------------------------------------------------------------------
-    // 產品識別邏輯 (Firebase 版本)
-    // -----------------------------------------------------------------------------
+    const [saveResultToast, setSaveResultToast] = useState(null);
+
+    const clearForm = useCallback(() => {
+        setBarcode('');
+        setProductName('');
+        setCurrentPrice('');
+        setDiscountDetails('');
+        setStoreName('');
+        setProductHistory([]);
+        setComparisonResult({ message: '等待比價數據...' });
+        setOcrResult(null);
+        setLookupStatus('ready');
+    }, []);
+
+    const stopCameraStream = useCallback(() => {
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+            console.log("Camera stream stopped.");
+        }
+    }, []);
+
+    useEffect(() => {
+        // Add a cleanup function to stop the camera when the component unmounts
+        return () => {
+            stopCameraStream();
+        };
+    }, [stopCameraStream]);
+
+    const startCameraStream = async () => {
+        if (streamRef.current) {
+            return streamRef.current;
+        }
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } });
+            streamRef.current = stream;
+            console.log("Camera stream started.");
+            return stream;
+        } catch (err) {
+            console.error("無法存取攝影機:", err);
+            setStatusMessage(`無法存取攝影機: ${err.name}`);
+            return null;
+        }
+    };
+
     const lookupProduct = useCallback(async (barcodeData) => {
         if (!barcodeData || barcodeData.length < 5) {
             setProductName('');
             setLookupStatus('ready');
+            setProductHistory([]);
             return;
         }
 
@@ -417,20 +484,16 @@ function App() {
         const numericalID = djb2Hash(barcodeData);
         
         try {
-            // 1. 查詢產品主檔
             const productRef = doc(db, "products", numericalID.toString());
             const productSnap = await getDoc(productRef);
 
             if (productSnap.exists()) {
-                // 如果產品存在，使用資料庫中的名稱並鎖定欄位
                 setProductName(productSnap.data().productName);
                 setLookupStatus('found');
             } else {
-                // 如果產品不存在，不要清除已有的（可能來自AI的）名稱
                 setLookupStatus('new');
             }
 
-            // 2. 查詢該產品的所有歷史價格紀錄
             const recordsQuery = query(
                 collection(db, "priceRecords"),
                 where("numericalID", "==", numericalID),
@@ -452,8 +515,10 @@ function App() {
         if (barcode.length > 0 && isAuthReady) {
             const timer = setTimeout(() => { lookupProduct(barcode); }, 500);
             return () => clearTimeout(timer);
+        } else if (barcode.length === 0) {
+            clearForm();
         }
-    }, [barcode, isAuthReady, lookupProduct]);
+    }, [barcode, isAuthReady, lookupProduct, clearForm]);
 
     useEffect(() => {
         if (statusMessage) {
@@ -465,35 +530,35 @@ function App() {
     const handleAiCaptureSuccess = useCallback((result) => {
         const { scannedBarcode, productName, extractedPrice, storeName, discountDetails } = result;
         setOcrResult(result);
-        if (scannedBarcode && scannedBarcode.length > 5) {
-            setBarcode(scannedBarcode);
-        } else if (!barcode) {
+        
+        const newBarcode = scannedBarcode || '';
+        setBarcode(newBarcode);
+
+        if (!newBarcode) {
             setStatusMessage("AI 未能識別條碼，請手動輸入或確保條碼清晰！");
+        } else {
+            setStatusMessage(`AI 分析成功！`);
         }
+
         setProductName(productName || '');
         setCurrentPrice(extractedPrice || '');
         setStoreName(storeName || '');
         setDiscountDetails(discountDetails || '');
-        if (productName) { setLookupStatus('found'); }
-        setStatusMessage(`AI 分析成功！`);
-    }, [barcode]);
 
-    // 儲存並比價函數 (Firebase 版本)
+        if (productName && newBarcode) {
+            setLookupStatus('found');
+        } else {
+            setLookupStatus('new');
+        }
+    }, []);
+
     const saveAndComparePrice = useCallback(async (selectedStore) => {
-        console.log("--- saveAndComparePrice triggered ---");
-        console.log("State at start of save:");
-        console.log(`productName: ${productName}`);
-        console.log(`currentPrice: ${currentPrice}`);
-        console.log(`barcode: ${barcode}`);
-        console.log(`storeName: ${storeName}`);
-        console.log(`selectedStore: ${selectedStore}`);
-
         const finalStoreName = selectedStore || storeName;
         const numericalID = djb2Hash(barcode);
         const priceValue = parseFloat(currentPrice);
 
         if (!userId || !barcode || !productName || isNaN(priceValue)) {
-            setStatusMessage("請確保已輸入條碼、產品名稱和有效價格！");
+            setSaveResultToast({ status: 'error', message: '請確保已輸入條碼、產品名稱和有效價格！', productName: productName || "未知產品" });
             return;
         }
         if (!finalStoreName.trim()) {
@@ -504,23 +569,18 @@ function App() {
         setIsLoading(true);
         
         try {
-            // 步驟 0: 檢查並創建產品主檔
             const productRef = doc(db, "products", numericalID.toString());
             const productSnap = await getDoc(productRef);
             if (!productSnap.exists()) {
-                const newProductData = {
+                await setDoc(productRef, {
                     numericalID,
                     barcodeData: barcode,
-                    productName, // This should be the value from the state
+                    productName,
                     createdAt: serverTimestamp(),
                     lastUpdatedBy: userId,
-                };
-                console.log("--- About to write to DB ---");
-                console.log("Data being written for new product:", newProductData);
-                await setDoc(productRef, newProductData);
+                });
             }
 
-            // 步驟 1: 儲存新的價格紀錄
             const priceRecord = {
                 numericalID,
                 productName,
@@ -532,44 +592,61 @@ function App() {
             };
             await addDoc(collection(db, "priceRecords"), priceRecord);
             
-            // 步驟 2: 執行比價
             const recordsQuery = query(collection(db, "priceRecords"), where("numericalID", "==", numericalID));
             const recordsSnap = await getDocs(recordsQuery);
             const records = recordsSnap.docs.map(doc => doc.data());
             
-            records.push({ ...priceRecord, timestamp: new Date() });
+            const allRecordsForCompare = [...records, { ...priceRecord, timestamp: new Date() }];
 
-            if (records.length <= 1) {
-                setComparisonResult({ isBest: true, bestPrice: priceValue, bestStore: finalStoreName, message: '這是第一筆紀錄！' });
+            let toastStatus, toastMessage, isBest, bestPrice, bestStore;
+
+            if (allRecordsForCompare.length <= 1) {
+                isBest = true;
+                bestPrice = priceValue;
+                bestStore = finalStoreName;
+                toastStatus = 'success';
+                toastMessage = '這是第一筆紀錄，成功建立！';
             } else {
-                const bestDeal = records.reduce((best, cur) => cur.price < best.price ? cur : best);
-                const isTrulyBest = priceValue < bestDeal.price || (priceValue === bestDeal.price && discountDetails);
-                setComparisonResult({
-                    isBest: isTrulyBest,
-                    bestPrice: bestDeal.price,
-                    bestStore: bestDeal.storeName,
-                    message: isTrulyBest ? '恭喜！這是目前紀錄中的最低標價！' : `非最低標價。歷史最低為 ${bestDeal.price} (${bestDeal.storeName})`
-                });
+                const bestDeal = allRecordsForCompare.reduce((best, cur) => cur.price < best.price ? cur : best);
+                isBest = priceValue <= bestDeal.price;
+                bestPrice = bestDeal.price;
+                bestStore = bestDeal.storeName;
+                
+                if (isBest) {
+                    toastStatus = 'success';
+                    toastMessage = '恭喜！這是目前紀錄中的最低標價！';
+                } else {
+                    toastStatus = 'warning';
+                    toastMessage = `非最低標價。歷史最低為 $${bestDeal.price} (${bestDeal.storeName})`;
+                }
             }
 
-            // 步驟 3: 重新載入歷史紀錄
-            console.log("Calling lookupProduct after save...");
+            setComparisonResult({ isBest, bestPrice, bestStore, message: toastMessage });
+            setSaveResultToast({ status: toastStatus, message: toastMessage, productName: productName });
+            
             lookupProduct(barcode);
-            setStatusMessage("成功儲存紀錄！");
 
         } catch (error) {
             console.error("儲存或比價失敗 (Firestore):", error);
-            setStatusMessage("數據操作失敗，請檢查網路連線或稍後再試。");
+            setSaveResultToast({ status: 'error', message: `數據操作失敗: ${error.message}`, productName: productName || "未知產品" });
         } finally {
             setIsLoading(false);
-            setOcrResult(null); // 清除 OCR 結果
         }
     }, [userId, barcode, productName, currentPrice, discountDetails, storeName, lookupProduct]);
 
     const handleStoreSelect = useCallback((selectedStore) => {
         setStoreName(selectedStore);
         setIsStoreSelectorOpen(false);
-    }, []);
+        saveAndComparePrice(selectedStore);
+    }, [saveAndComparePrice]);
+
+    const handleNewScanClick = async () => {
+        clearForm();
+        const stream = await startCameraStream();
+        if (stream) {
+            setIsCaptureModalOpen(true);
+        }
+    };
 
     const themePrimary = currentTheme.primary;
     const themeText = currentTheme.text;
@@ -595,6 +672,7 @@ function App() {
 
     return (
         <div className={`min-h-screen p-4 sm:p-8 ${themeLight}`}>
+            <SaveResultToast result={saveResultToast} onClose={() => setSaveResultToast(null)} />
             <div className="max-w-xl mx-auto">
                 <header className="flex justify-between items-center mb-6 border-b pb-4">
                     <h1 className={`text-3xl font-extrabold ${themeText} flex items-center`}><Barcode className="w-8 h-8 mr-2" />條碼比價神器 (Cloud)</h1>
@@ -605,7 +683,7 @@ function App() {
                     </div>
                 </header>
 
-                {statusMessage && <div className="bg-green-500 text-white p-3 rounded-lg shadow-md mb-4 text-center font-medium">{statusMessage}</div>}
+                {statusMessage && <div className="bg-blue-500 text-white p-3 rounded-lg shadow-md mb-4 text-center font-medium">{statusMessage}</div>}
 
                 {ocrResult && (
                     <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-4 mb-6">
@@ -623,7 +701,7 @@ function App() {
 
                 <div className={`p-6 rounded-xl shadow-2xl bg-white border-t-4 ${themeBorder}`}>
                     <h2 className={`text-xl font-semibold ${themeText} mb-6 flex items-center`}><Zap className="w-5 h-5 mr-2" />步驟 1: AI 視覺自動擷取</h2>
-                    <button className={`w-full p-4 rounded-lg text-white font-bold text-lg shadow-xl transition-all ${themePrimary} hover:opacity-80 flex items-center justify-center`} onClick={() => setIsCaptureModalOpen(true)}>
+                    <button className={`w-full p-4 rounded-lg text-white font-bold text-lg shadow-xl transition-all ${themePrimary} hover:opacity-80 flex items-center justify-center`} onClick={handleNewScanClick}>
                         <Camera className="inline-block w-6 h-6 mr-3" />開啟鏡頭擷取
                     </button>
                     <hr className="my-6 border-gray-200" />
@@ -644,7 +722,14 @@ function App() {
                         </div>
                         <div>
                             <label className="block text-gray-700 font-medium mb-1">商店名稱</label>
-                            <input type="text" value={storeName} onChange={(e) => setStoreName(e.target.value)} placeholder="AI 擷取" className="w-full p-3 border border-gray-300 rounded-lg" />
+                            <input 
+                                type="text" 
+                                value={storeName} 
+                                onFocus={() => setIsStoreSelectorOpen(true)}
+                                readOnly
+                                placeholder="點擊選擇商店"
+                                className="w-full p-3 border border-gray-300 rounded-lg bg-gray-50 cursor-pointer"
+                            />
                         </div>
                     </div>
                     <div className="mb-6">
@@ -672,7 +757,7 @@ function App() {
             </div>
 
             {isThemeModalOpen && <ThemeSelector theme={currentTheme} saveTheme={saveUserTheme} onClose={() => setIsThemeModalOpen(false)} />}
-            {isCaptureModalOpen && <AIOcrCaptureModal theme={currentTheme} onAnalysisSuccess={handleAiCaptureSuccess} onClose={() => setIsCaptureModalOpen(false)} />}
+            {isCaptureModalOpen && <AIOcrCaptureModal theme={currentTheme} onAnalysisSuccess={handleAiCaptureSuccess} onClose={() => setIsCaptureModalOpen(false)} stream={streamRef.current} />}
             {isStoreSelectorOpen && <StoreSelector theme={currentTheme} onSelect={handleStoreSelect} onClose={() => setIsStoreSelectorOpen(false)} />}
         </div>
     );

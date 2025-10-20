@@ -317,8 +317,11 @@ function AllRecordsPage({ theme, onBack, db }) {
 
     useLayoutEffect(() => {
         if (isAfterDelete && !loading) {
-            window.scrollTo(0, scrollPositionRef.current);
-            setIsAfterDelete(false); // Reset the signal
+            // Use requestAnimationFrame to ensure scroll happens after browser paints
+            requestAnimationFrame(() => {
+                window.scrollTo(0, scrollPositionRef.current);
+                setIsAfterDelete(false); // Reset the signal after scrolling
+            });
         }
     }, [loading, isAfterDelete]);
 

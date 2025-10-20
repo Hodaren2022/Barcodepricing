@@ -307,6 +307,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
             const apiUrl = `/.netlify/functions/gemini-proxy`;
             const payload = { systemPrompt, userPrompt: userQuery, base64Image, responseSchema: newSchema };
             const analysisResult = await withExponentialBackoff(() => callGeminiApiWithRetry(payload, apiUrl));
+            console.log("AI Analysis Result:", analysisResult); // Added console.log for debugging
 
             // 計算並添加單價欄位 (從單價計算.txt 複製過來)
             const { listedPrice, totalCapacity, baseUnit } = analysisResult;
@@ -823,6 +824,7 @@ function App() {
                             <div>條碼:</div><div>{ocrResult.scannedBarcode || 'N/A'}</div>
                             <div>品名:</div><div>{ocrResult.productName || 'N/A'}</div>
                             <div>價格:</div><div>${ocrResult.extractedPrice || 'N/A'}</div>
+                            <div>數量:</div><div>{ocrResult.quantity || 'N/A'}</div>
                             <div>商店:</div><div>{ocrResult.storeName || 'N/A'}</div>
                             <div>折扣:</div><div>{ocrResult.discountDetails || '無'}</div>
                         </div>

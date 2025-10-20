@@ -613,7 +613,7 @@ function App() {
         // Adjust early exit condition:
         // If no barcode and no product name, or if barcode is too short and no product name,
         // then we can't look up a product.
-        if (!numericalID || (!barcodeData && !currentProductName) || (barcodeData && barcodeData.length < 5 && !currentProductName)) {
+        if (!numericalID) { // If numericalID couldn't be generated, then we can't look up a product.
             setProductName('');
             setLookupStatus('ready');
             setProductHistory([]);
@@ -929,7 +929,7 @@ function App() {
                     </div>
                 </div>
 
-                {(lookupStatus === 'found' || lookupStatus === 'new') && barcode && <PriceHistoryDisplay historyRecords={productHistory} theme={currentTheme} />}
+                {(lookupStatus === 'found' || lookupStatus === 'new') && <PriceHistoryDisplay historyRecords={productHistory} theme={currentTheme} />}
             </div>
 
             {isThemeModalOpen && <ThemeSelector theme={currentTheme} saveTheme={saveUserTheme} onClose={() => setIsThemeModalOpen(false)} />}

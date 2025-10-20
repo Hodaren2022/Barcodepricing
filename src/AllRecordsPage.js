@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffect } from 'react';
 import { ArrowLeft, Database, TrendingUp, Edit, Trash2, Save, X, CheckCircle } from 'lucide-react';
 import { collection, getDocs, query, orderBy, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 
@@ -166,15 +166,15 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
                     <p className="text-xs text-gray-500">ID: {product.numericalID}</p>
                 </div>
                 <div className="text-right">
-                    <p className="text-2xl font-bold text-indigo-600">{isNaN(latestRecord.unitPrice) && isNaN(latestRecord.price) ? 'N/A' : `$${(latestRecord.unitPrice || latestRecord.price || 0).toFixed(2)}`}</p>
+                    <p className="text-2xl font-bold text-indigo-600">{isNaN(latestRecord.unitPrice) && isNaN(latestRecord.price) ? 'N/A' : `${(latestRecord.unitPrice || latestRecord.price || 0).toFixed(2)}`}</p>
                     <p className="text-xs text-gray-500">{latestRecord.timestamp.toLocaleDateString()}</p>
                 </div>
             </div>
 
             <div className="grid grid-cols-3 gap-2 my-3 text-center">
-                <div className="bg-green-50 p-2 rounded"><p className="text-xs text-gray-500">最低單價</p><p className="font-bold text-green-600">{isNaN(lowestUnitPrice) ? 'N/A' : `$${lowestUnitPrice.toFixed(2)}`}</p></div>
-                <div className="bg-blue-50 p-2 rounded"><p className="text-xs text-gray-500">平均單價</p><p className="font-bold text-blue-600">{isNaN(avgUnitPrice) ? 'N/A' : `$${avgUnitPrice.toFixed(2)}`}</p></div>
-                <div className="bg-red-50 p-2 rounded"><p className="text-xs text-gray-500">最高單價</p><p className="font-bold text-red-600">{isNaN(highestUnitPrice) ? 'N/A' : `$${highestUnitPrice.toFixed(2)}`}</p></div>
+                <div className="bg-green-50 p-2 rounded"><p className="text-xs text-gray-500">最低單價</p><p className="font-bold text-green-600">{isNaN(lowestUnitPrice) ? 'N/A' : `${lowestUnitPrice.toFixed(2)}`}</p></div>
+                <div className="bg-blue-50 p-2 rounded"><p className="text-xs text-gray-500">平均單價</p><p className="font-bold text-blue-600">{isNaN(avgUnitPrice) ? 'N/A' : `${avgUnitPrice.toFixed(2)}`}</p></div>
+                <div className="bg-red-50 p-2 rounded"><p className="text-xs text-gray-500">最高單價</p><p className="font-bold text-red-600">{isNaN(highestUnitPrice) ? 'N/A' : `${highestUnitPrice.toFixed(2)}`}</p></div>
             </div>
 
             <div className="mb-4"><PriceTrendChart records={formattedRecords} productName={product.productName} /></div>
@@ -192,8 +192,8 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
                                 <div>
                                     <p className="font-medium">
                                         {isNaN(record.price) || isNaN(record.unitPrice) ?
-                                            `$${(record.price || 0).toFixed(2)}@--` :
-                                            `$${record.price}@$${(record.unitPrice || 0).toFixed(2)}`
+                                            `${(record.price || 0).toFixed(2)}@--` :
+                                            `${record.price}@${(record.unitPrice || 0).toFixed(2)}`
                                         }
                                     </p>
                                     {record.discountDetails && <p className="text-xs text-indigo-600">{record.discountDetails}</p>}
@@ -220,6 +220,8 @@ function AllRecordsPage({ theme, onBack, db }) {
     const [editingRecord, setEditingRecord] = useState(null);
     const [deletingRecord, setDeletingRecord] = useState(null);
     const [successMessage, setSuccessMessage] = useState('');
+    const scrollPositionRef = useRef(0); // For scroll restoration
+    const [isAfterDelete, setIsAfterDelete] = useState(false); // Signal for scroll restoration
 
     const fetchData = useCallback(async () => {
         if (!db) return;
@@ -258,6 +260,13 @@ function AllRecordsPage({ theme, onBack, db }) {
         fetchData();
     }, [fetchData]);
 
+    useLayoutEffect(() => {
+        if (isAfterDelete && !loading) {
+            window.scrollTo(0, scrollPositionRef.current);
+            setIsAfterDelete(false); // Reset the signal
+        }
+    }, [loading, isAfterDelete]);
+
     const sortedProducts = useMemo(() => {
         return [...allProducts].sort((a, b) => {
             const recordsA = allRecords[a.numericalID] || [];
@@ -295,6 +304,7 @@ function AllRecordsPage({ theme, onBack, db }) {
     };
 
     const handleDelete = (record) => {
+        scrollPositionRef.current = window.scrollY; // Save scroll position
         setDeletingRecord(record);
     };
 
@@ -316,6 +326,7 @@ function AllRecordsPage({ theme, onBack, db }) {
 
     const confirmDelete = async () => {
         if (!db || !deletingRecord) return;
+        setIsAfterDelete(true); // Signal that the next data fetch is after a delete
         try {
             const recordRef = doc(db, "priceRecords", deletingRecord.id);
             await deleteDoc(recordRef);

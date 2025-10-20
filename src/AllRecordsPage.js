@@ -69,6 +69,7 @@ function SwipeableRecord({ children, onEdit, onDelete }) {
     const [translateX, setTranslateX] = useState(0);
     const touchStartX = useRef(0);
     const itemRef = useRef(null);
+    const buttonsRef = useRef(null);
 
     const handleTouchStart = (e) => {
         touchStartX.current = e.touches[0].clientX;
@@ -90,6 +91,22 @@ function SwipeableRecord({ children, onEdit, onDelete }) {
         }
     };
 
+    useEffect(() => {
+        const handleGlobalClick = (e) => {
+            if (buttonsRef.current && !buttonsRef.current.contains(e.target)) {
+                setTranslateX(0);
+            }
+        };
+
+        if (translateX !== 0) {
+            document.addEventListener('click', handleGlobalClick, true);
+        }
+
+        return () => {
+            document.removeEventListener('click', handleGlobalClick, true);
+        };
+    }, [translateX]);
+
     const handleEdit = () => {
         onEdit();
         setTranslateX(0);
@@ -102,7 +119,7 @@ function SwipeableRecord({ children, onEdit, onDelete }) {
 
     return (
         <div className="relative overflow-hidden">
-            <div className="absolute top-0 right-0 h-full flex items-center">
+            <div ref={buttonsRef} className="absolute top-0 right-0 h-full flex items-center">
                 <button onClick={handleEdit} className="bg-blue-500 text-white h-full w-20 flex flex-col items-center justify-center">
                     <Edit size={20} />
                     <span>編輯</span>

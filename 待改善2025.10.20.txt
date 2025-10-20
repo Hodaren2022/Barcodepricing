@@ -1,0 +1,71 @@
+優化性能與邏輯：抽取單價計算函數 (單價計算.txt 參考)：javascript
+
+
+
+function calculateUnitPrice(price, quantity, unitType) { const p = parseFloat(price); const q = parseFloat(quantity); if (isNaN(p) || isNaN(q) || q <= 0) return null; return (unitType === 'g' || unitType === 'ml') ? (p / q) * 100 : p / q;}
+
+
+
+在 useEffect、handleAnalyze 等處呼叫。
+
+合併 Firestore 查詢：在 saveAndComparePrice 中，先查 records，然後在新增後直接用本地陣列比價，減少一次讀取。
+
+添加分頁：在 lookupProduct 與 AllRecordsPage 中，使用 Firestore 的 limit 與 startAfter 實作無限捲動。
+
+
+1. 優化性能與邏輯：抽取單價計算函數
+建議： 抽取 calculateUnitPrice 函數 (單價計算.txt 參考)，並在 useEffect、handleAnalyze 等處呼叫。
+
+可行性與優勢： 極高。
+
+單一職責原則 (SRP)： 將複雜的計算邏輯隔離，確保單價計算的規則（如公克/毫升需乘以 100 進行單位標準化）只存在於一個地方。
+
+一致性： 確保無論是使用者手動輸入、AI 擷取分析 (handleAnalyze)，還是歷史數據處理 (useEffect 或其他組件)，單價計算邏輯都完全一致，從而避免數據不一致性錯誤。
+
+測試性： 外部函數可以獨立於 React 組件進行單元測試，大幅簡化除錯和驗證流程。
+
+需要注意的細節：
+
+輸入解析： 您的函數已經包含 parseFloat(price) 和 parseFloat(quantity) 以及錯誤檢查 (isNaN(p) || isNaN(q) || q <= 0)，這點做得非常好，確保了函數的穩健性。
+
+命名與位置： 建議將此函數放在一個通用的 utils 或 helpers 資料夾中，例如 utils/priceCalculations.js，以利於專案結構清晰。
+
+2. 合併 Firestore 查詢（減少讀取次數）
+建議： 在 saveAndComparePrice 中，先查詢歷史 records，然後在新增紀錄後直接用本地陣列比價，減少一次讀取。
+
+可行性與優勢： 極高，這是數據庫操作優化的典範。
+
+性能提升與成本節省： 減少一次 Firestore 讀取操作。在雲端資料庫中，讀取操作通常是產生費用的主要來源，減少一次讀取可以直接降低運行成本並提升延遲（Latency）。
+
+邏輯效率： 比較邏輯需要將新記錄與所有舊記錄進行對比。只要在新增記錄前讀取舊記錄，新增後將新記錄物件添加到讀取的舊記錄陣列中，就可以在本地完成完整的比價流程，無需再次查詢資料庫。
+
+需要注意的細節：
+
+本地數據包含性： 實作時，必須確保本地比較的陣列中包含 1. 剛讀取的歷史紀錄 和 2. 剛成功寫入的新紀錄。
+
+寫入確認： 由於是在寫入之後才進行本地比價，您需要確保資料庫寫入操作 (addDoc 或 setDoc) 成功完成後，再執行比價邏輯。
+
+3. 添加分頁：使用 limit 與 startAfter 實作無限捲動
+建議： 在 lookupProduct 與 AllRecordsPage 中，使用 Firestore 的 limit 與 startAfter 實作無限捲動。
+
+可行性與優勢： 高。這是處理大型數據集（尤其在行動裝置上）的標準且必要的做法。
+
+使用者體驗 (UX)： 無限捲動（或稱為延遲加載）消除了傳統分頁的點擊負擔，提供流暢的瀏覽體驗。
+
+資源效率： 每次只加載固定數量的文件（例如 10 或 20 筆），大大減少了瀏覽器處理的數據量和首次加載時間。
+
+Firestore 最佳實踐： limit 和 startAfter 是 Firestore 針對分頁推薦的官方方法（基於 Cursor 的分頁），效率極高。
+
+需要注意的細節：
+
+狀態管理複雜度： 您需要管理三個關鍵的 React 狀態：
+
+records: 當前已加載的所有記錄列表。
+
+lastVisible: 用於下一頁查詢的起始點（即上一頁的最後一個文件快照）。
+
+isLoading / hasMore: 處理載入狀態和判斷是否已到達列表末尾。
+
+排序依賴： startAfter 必須依賴一個固定的排序條件 (orderBy)。您需要確保所有分頁查詢都使用相同的排序規則（例如按時間戳記降序 timestamp, 'desc'）。
+
+UI 呈現： 必須設計一個清晰的載入指示器（Loading Spinner），並在列表底部觸發新的查詢。

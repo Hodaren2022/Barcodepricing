@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffect } from 'react';
-import { ArrowLeft, Database, TrendingUp, Edit, Trash2, Save, X, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Database, TrendingUp, Edit, Trash2, Save, X, CheckCircle, Search } from 'lucide-react';
 import { collection, getDocs, query, orderBy, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 
 // 圖表組件
@@ -222,6 +222,8 @@ function AllRecordsPage({ theme, onBack, db }) {
     const [successMessage, setSuccessMessage] = useState('');
     const scrollPositionRef = useRef(0); // For scroll restoration
     const [isAfterDelete, setIsAfterDelete] = useState(false); // Signal for scroll restoration
+    const [searchQuery, setSearchQuery] = useState('');
+    const [isSearchOpen, setIsSearchOpen] = useState(false);
 
     const fetchData = useCallback(async () => {
         if (!db) return;
@@ -267,8 +269,8 @@ function AllRecordsPage({ theme, onBack, db }) {
         }
     }, [loading, isAfterDelete]);
 
-    const sortedProducts = useMemo(() => {
-        return [...allProducts].sort((a, b) => {
+    const filteredProducts = useMemo(() => {
+        const sorted = [...allProducts].sort((a, b) => {
             const recordsA = allRecords[a.numericalID] || [];
             const recordsB = allRecords[b.numericalID] || [];
             
@@ -290,7 +292,15 @@ function AllRecordsPage({ theme, onBack, db }) {
             const timeB = latestRecordB?.timestamp?.toDate ? latestRecordB.timestamp.toDate().getTime() : 0;
             return timeB - timeA;
         });
-    }, [allProducts, allRecords, sortOption]);
+
+        if (!searchQuery) {
+            return sorted;
+        }
+
+        return sorted.filter(product =>
+            product.productName.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+    }, [allProducts, allRecords, sortOption, searchQuery]);
 
     const showSuccessMessage = (message) => {
         setSuccessMessage(message);
@@ -354,7 +364,7 @@ function AllRecordsPage({ theme, onBack, db }) {
 
     return (
         <div className="min-h-screen p-4 sm:p-8 bg-gray-100">
-            <div className="max-w-4xl mx-auto">
+            <div className="max-w-4xl mx-auto pb-20"> {/* Added pb-20 for floating button */}
                 <SuccessMessage message={successMessage} />
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6">
                     <div className="flex items-center mb-4 sm:mb-0">
@@ -371,21 +381,36 @@ function AllRecordsPage({ theme, onBack, db }) {
                     </div>
                 </div>
 
-                {sortedProducts.length === 0 ? (
+                {isSearchOpen && (
+                    <div className="mb-4">
+                        <div className="relative">
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="輸入品名進行模糊搜尋..."
+                                className="w-full p-3 pl-10 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                            />
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                        </div>
+                    </div>
+                )}
+
+                {filteredProducts.length === 0 ? (
                     <div className="text-center py-10 bg-white rounded-xl shadow">
                         <Database size={48} className="mx-auto text-gray-400 mb-4" />
-                        <h3 className="text-xl font-semibold text-gray-700 mb-2">暫無記錄</h3>
-                        <p className="text-gray-500">還沒有任何產品和價格記錄</p>
+                        <h3 className="text-xl font-semibold text-gray-700 mb-2">{searchQuery ? '找不到結果' : '暫無記錄'}</h3>
+                        <p className="text-gray-500">{searchQuery ? `找不到符合 "${searchQuery}" 的產品` : '還沒有任何產品和價格記錄'}</p>
                     </div>
                 ) : (
                     <div>
                         <div className="mb-4 p-4 bg-white rounded-lg shadow">
                             <div className="flex justify-between">
-                                <p className="text-gray-700">總共 <span className="font-bold">{sortedProducts.length}</span> 個產品</p>
+                                <p className="text-gray-700">總共 <span className="font-bold">{filteredProducts.length}</span> 個產品</p>
                                 <p className="text-gray-700">總共 <span className="font-bold">{Object.values(allRecords).flat().length}</span> 條記錄</p>
                             </div>
                         </div>
-                        {sortedProducts.map(product => {
+                        {filteredProducts.map(product => {
                             const records = allRecords[product.numericalID] || [];
                             if (records.length === 0) return null;
                             return <ProductRecord key={product.numericalID} product={product} records={records} theme={theme} onEdit={handleEdit} onDelete={handleDelete} />;
@@ -408,6 +433,14 @@ function AllRecordsPage({ theme, onBack, db }) {
                         onConfirm={confirmDelete}
                     />
                 )}
+
+                <button
+                    onClick={() => setIsSearchOpen(!isSearchOpen)}
+                    className="fixed bottom-6 right-6 bg-indigo-600 text-white p-4 rounded-full shadow-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-transform duration-300 ease-in-out"
+                    aria-label="搜尋"
+                >
+                    {isSearchOpen ? <X size={24} /> : <Search size={24} />}
+                </button>
             </div>
         </div>
     );

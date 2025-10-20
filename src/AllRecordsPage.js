@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ArrowLeft, Database, TrendingUp, Edit, Trash2, Save, X, CheckCircle } from 'lucide-react';
 import { collection, getDocs, query, orderBy, where, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 
@@ -198,7 +198,7 @@ function AllRecordsPage({ theme, onBack, db }) {
     const [deletingRecord, setDeletingRecord] = useState(null);
     const [successMessage, setSuccessMessage] = useState('');
 
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         if (!db) return;
         setLoading(true);
         try {
@@ -229,11 +229,11 @@ function AllRecordsPage({ theme, onBack, db }) {
         } finally {
             setLoading(false);
         }
-    };
+    }, [db]);
 
     useEffect(() => {
         fetchData();
-    }, [db]);
+    }, [fetchData]);
 
     const sortedProducts = useMemo(() => {
         return [...allProducts].sort((a, b) => {

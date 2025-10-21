@@ -271,6 +271,17 @@ function AllRecordsPage({ theme, onBack, db }) {
     const [searchQuery, setSearchQuery] = useState('');
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const searchInputRef = useRef(null);
+    
+    // Edit mode states
+    const [isEditMode, setIsEditMode] = useState(false);
+    const [selectedItems, setSelectedItems] = useState(new Set());
+    const [localProducts, setLocalProducts] = useState([]);
+    const [localRecords, setLocalRecords] = useState({});
+    // 新增狀態：批量刪除確認對話框
+    const [isBulkDeleteConfirmationOpen, setIsBulkDeleteConfirmationOpen] = useState(false);
+    // 新增狀態：原始數據快照和衝突解決
+    const [originalDataSnapshot, setOriginalDataSnapshot] = useState(null);
+    const [isConflictDialogOpen, setIsConflictDialogOpen] = useState(false);
 
     const fetchData = useCallback(async () => {
         if (!db) return;
@@ -326,11 +337,15 @@ function AllRecordsPage({ theme, onBack, db }) {
     }, [loading, isAfterDelete]);
 
     const filteredProducts = useMemo(() => {
+        // Use local data in edit mode, otherwise use Firebase data
+        const products = isEditMode ? localProducts : allProducts;
+        const records = isEditMode ? localRecords : allRecords;
+
         if (searchQuery.trim() === '') {
             // No search query, just sort the products
-            return [...allProducts].sort((a, b) => {
-                const recordsA = allRecords[a.numericalID] || [];
-                const recordsB = allRecords[b.numericalID] || [];
+            return [...products].sort((a, b) => {
+                const recordsA = records[a.numericalID] || [];
+                const recordsB = records[b.numericalID] || [];
                 
                 if (sortOption === 'name') {
                     return a.productName.localeCompare(b.productName);
@@ -353,7 +368,7 @@ function AllRecordsPage({ theme, onBack, db }) {
         }
 
         // Fuzzy search logic
-        const scoredProducts = allProducts
+        const scoredProducts = products
             .map(product => ({
                 product,
                 score: fuzzyMatch(searchQuery, product.productName)
@@ -363,7 +378,7 @@ function AllRecordsPage({ theme, onBack, db }) {
         
         return scoredProducts.map(item => item.product);
 
-    }, [allProducts, allRecords, sortOption, searchQuery]);
+    }, [allProducts, allRecords, sortOption, searchQuery, isEditMode, localProducts, localRecords]);
 
     const showSuccessMessage = (message) => {
         setSuccessMessage(message);
@@ -379,6 +394,180 @@ function AllRecordsPage({ theme, onBack, db }) {
     const handleDelete = (record) => {
         scrollPositionRef.current = window.scrollY; // Save scroll position
         setDeletingRecord(record);
+    };
+
+    // New function to handle checkbox selection
+    const handleItemSelect = (productId) => {
+        setSelectedItems(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(productId)) {
+                newSet.delete(productId);
+            } else {
+                newSet.add(productId);
+            }
+            return newSet;
+        });
+    };
+
+    // 修改批量刪除功能以使用確認對話框
+    const handleBulkDeleteClick = () => {
+        if (selectedItems.size === 0) return;
+        setIsBulkDeleteConfirmationOpen(true);
+    };
+
+    // New function to delete selected items
+    const deleteSelectedItems = async () => {
+        if (selectedItems.size === 0) return;
+        
+        try {
+            // Update local state
+            setLocalProducts(prev => prev.filter(product => !selectedItems.has(product.numericalID)));
+            setLocalRecords(prev => {
+                const newRecords = {...prev};
+                selectedItems.forEach(productId => {
+                    delete newRecords[productId];
+                });
+                return newRecords;
+            });
+            
+            // Clear selection
+            setSelectedItems(new Set());
+            setIsBulkDeleteConfirmationOpen(false);
+        } catch (error) {
+            console.error("Error deleting selected items:", error);
+        }
+    };
+
+    // 新增函數：檢查衝突並退出編輯模式
+    const checkForConflictsAndExit = async () => {
+        if (!db || !originalDataSnapshot) return;
+        
+        try {
+            // 獲取當前 Firebase 數據
+            const productsQuery = query(collection(db, "products"), orderBy("createdAt", "desc"));
+            const productsSnap = await getDocs(productsQuery);
+            const currentProducts = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            
+            const recordsQuery = query(collection(db, "priceRecords"), orderBy("timestamp", "desc"));
+            const recordsSnap = await getDocs(recordsQuery);
+            const currentRecordsArray = recordsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            
+            // 將記錄按產品 ID 分組
+            const currentRecords = {};
+            currentRecordsArray.forEach(record => {
+                if (!currentRecords[record.numericalID]) {
+                    currentRecords[record.numericalID] = [];
+                }
+                currentRecords[record.numericalID].push(record);
+            });
+            
+            // 比較當前數據與原始快照
+            const hasConflicts = checkForDataConflicts(originalDataSnapshot, {products: currentProducts, records: currentRecords});
+            
+            if (hasConflicts) {
+                // 如果有衝突，顯示衝突解決對話框
+                setIsConflictDialogOpen(true);
+            } else {
+                // 如果沒有衝突，直接退出編輯模式
+                await exitEditMode(currentProducts, currentRecords);
+            }
+        } catch (error) {
+            console.error("檢查數據衝突時出錯:", error);
+            // 出錯時仍然退出編輯模式
+            await exitEditMode();
+        }
+    };
+    
+    // 新增函數：檢查數據衝突
+    const checkForDataConflicts = (original, current) => {
+        // 比較產品數量
+        if (original.products.length !== current.products.length) {
+            return true;
+        }
+        
+        // 比較記錄數量
+        const originalRecordCount = Object.values(original.records).reduce((count, records) => count + records.length, 0);
+        const currentRecordCount = Object.values(current.records).reduce((count, records) => count + records.length, 0);
+        
+        if (originalRecordCount !== currentRecordCount) {
+            return true;
+        }
+        
+        // 更詳細的比較可以在此處添加
+        // 為了簡化，我們只檢查數量變化
+        
+        return false;
+    };
+    
+    // 修改 exitEditMode 函數以接受當前數據
+    const exitEditMode = async (currentProducts = null, currentRecords = null) => {
+        if (!db) return;
+        
+        try {
+            // 如果沒有提供當前數據，則獲取最新數據
+            let latestProducts = currentProducts;
+            let latestRecords = currentRecords;
+            
+            if (!latestProducts || !latestRecords) {
+                const productsQuery = query(collection(db, "products"), orderBy("createdAt", "desc"));
+                const productsSnap = await getDocs(productsQuery);
+                latestProducts = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                const recordsQuery = query(collection(db, "priceRecords"), orderBy("timestamp", "desc"));
+                const recordsSnap = await getDocs(recordsQuery);
+                const currentRecordsArray = recordsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                // 將記錄按產品 ID 分組
+                latestRecords = {};
+                currentRecordsArray.forEach(record => {
+                    if (!latestRecords[record.numericalID]) {
+                        latestRecords[record.numericalID] = [];
+                    }
+                    latestRecords[record.numericalID].push(record);
+                });
+            }
+            
+            // 計算需要從 Firebase 刪除的產品
+            const productsToDelete = latestProducts.filter(product => 
+                !localProducts.some(localProduct => localProduct.numericalID === product.numericalID)
+            );
+            
+            // 刪除 Firebase 中的產品及其記錄
+            for (const product of productsToDelete) {
+                // 刪除所有記錄
+                const productRecords = latestRecords[product.numericalID] || [];
+                for (const record of productRecords) {
+                    const recordRef = doc(db, "priceRecords", record.id);
+                    await deleteDoc(recordRef);
+                }
+            }
+            
+            // 計算需要從 Firebase 刪除的記錄（編輯模式下刪除的記錄）
+            const recordsToDelete = [];
+            for (const [productId, records] of Object.entries(latestRecords)) {
+                const localRecordsForProduct = localRecords[productId] || [];
+                // 找出在原始記錄中存在但在本地記錄中不存在的記錄
+                const deletedRecords = records.filter(record => 
+                    !localRecordsForProduct.some(localRecord => localRecord.id === record.id)
+                );
+                recordsToDelete.push(...deletedRecords);
+            }
+            
+            // 刪除 Firebase 中的記錄
+            for (const record of recordsToDelete) {
+                const recordRef = doc(db, "priceRecords", record.id);
+                await deleteDoc(recordRef);
+            }
+            
+            // 重新從 Firebase 獲取數據
+            await fetchData();
+            setIsEditMode(false);
+            setSelectedItems(new Set());
+            setOriginalDataSnapshot(null);
+
+        } catch (error) {
+            console.error("Error syncing with Firebase:", error);
+        }
     };
 
     const handleSaveEdit = async (updatedRecord) => {
@@ -397,18 +586,79 @@ function AllRecordsPage({ theme, onBack, db }) {
         setEditingRecord(null);
     };
 
+    // 新增函數：處理衝突解決
+    const handleConflictResolution = async (resolutionType) => {
+        setIsConflictDialogOpen(false);
+        
+        switch (resolutionType) {
+            case 'local':
+                // 保留本地更改，直接退出編輯模式
+                await exitEditMode();
+                break;
+            case 'remote':
+                // 保留遠程數據，重新獲取最新數據並退出
+                await fetchData();
+                setIsEditMode(false);
+                setSelectedItems(new Set());
+                setOriginalDataSnapshot(null);
+
+                break;
+            case 'merge':
+                // 手動合併，重新獲取數據並保持編輯模式
+                await fetchData();
+                setLocalProducts([...allProducts]);
+                setLocalRecords({...allRecords});
+                // 保持編輯模式開啟，讓用戶繼續編輯
+                setOriginalDataSnapshot({
+                    products: [...allProducts],
+                    records: {...allRecords},
+                    timestamp: Date.now()
+                });
+
+                break;
+            default:
+                // 默認情況下直接退出編輯模式
+                await exitEditMode();
+        }
+    };
+
     const confirmDelete = async () => {
         if (!db || !deletingRecord) return;
-        setIsAfterDelete(true); // Signal that the next data fetch is after a delete
-        try {
-            const recordRef = doc(db, "priceRecords", deletingRecord.id);
-            await deleteDoc(recordRef);
-            await fetchData(); // 重新獲取數據以更新UI
-            showSuccessMessage('記錄已成功刪除');
-        } catch (error) {
-            console.error("刪除記錄失敗:", error);
+        
+        // 在編輯模式下，我們只需要更新本地狀態，不需要重新整理畫面
+        if (isEditMode) {
+            try {
+                // 更新本地狀態而不是調用 Firebase
+                setLocalRecords(prev => {
+                    const newRecords = {...prev};
+                    if (newRecords[deletingRecord.numericalID]) {
+                        newRecords[deletingRecord.numericalID] = newRecords[deletingRecord.numericalID].filter(
+                            record => record.id !== deletingRecord.id
+                        );
+                    }
+                    return newRecords;
+                });
+                
+                // 顯示成功消息
+                showSuccessMessage('記錄已成功刪除');
+            } catch (error) {
+                console.error("刪除記錄失敗:", error);
+            } finally {
+                setDeletingRecord(null);
+            }
+        } else {
+            // 非編輯模式下保持原有行為
+            setIsAfterDelete(true); // Signal that the next data fetch is after a delete
+            try {
+                const recordRef = doc(db, "priceRecords", deletingRecord.id);
+                await deleteDoc(recordRef);
+                await fetchData(); // 重新獲取數據以更新UI
+                showSuccessMessage('記錄已成功刪除');
+            } catch (error) {
+                console.error("刪除記錄失敗:", error);
+            }
+            setDeletingRecord(null);
         }
-        setDeletingRecord(null);
     };
 
     const handleSearchToggle = () => {
@@ -443,13 +693,65 @@ function AllRecordsPage({ theme, onBack, db }) {
                     </div>
                     <div className="flex items-center">
                         <label className="mr-2 text-gray-700">排序:</label>
-                        <select value={sortOption} onChange={(e) => setSortOption(e.target.value)} className="border border-gray-300 rounded p-2">
+                        <select value={sortOption} onChange={(e) => setSortOption(e.target.value)} className="border border-gray-300 rounded p-2 mr-2">
                             <option value="latest">最新記錄</option>
                             <option value="name">產品名稱</option>
                             <option value="price">最新價格</option>
                         </select>
+                        <button 
+                            onClick={() => {
+                                if (!isEditMode) {
+                                    // Enter edit mode - copy current data to local state
+                                    setLocalProducts([...allProducts]);
+                                    setLocalRecords({...allRecords});
+                                    // 保存原始數據快照和時間戳
+                                    setOriginalDataSnapshot({
+                                        products: [...allProducts],
+                                        records: {...allRecords},
+                                        timestamp: Date.now()
+                                    });
+                                } else {
+                                    // Exit edit mode - 檢查數據版本衝突
+                                    checkForConflictsAndExit();
+                                }
+                                setIsEditMode(!isEditMode);
+                                setSelectedItems(new Set());
+                            }}
+                            className={`px-3 py-2 rounded text-white text-sm ${
+                                isEditMode ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-500 hover:bg-blue-600'
+                            }`}
+                        >
+                            {isEditMode ? '退出編輯模式' : '編輯模式'}
+                        </button>
                     </div>
                 </div>
+
+                {/* Floating Delete Button - 修改為固定位置 */}
+                {isEditMode && selectedItems.size > 0 && (
+                    <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 bg-red-500 text-white rounded-full p-4 shadow-lg z-50 flex items-center"
+                         style={{bottom: '6rem'}}>
+                        <button 
+                            onClick={handleBulkDeleteClick}
+                            className="flex items-center"
+                        >
+                            <Trash2 size={20} className="mr-2" />
+                            刪除選取項目 ({selectedItems.size})
+                        </button>
+                    </div>
+                )}
+
+                {/* Floating Exit Edit Mode Button - 修改為固定位置 */}
+                {isEditMode && (
+                    <div className="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white rounded-full p-4 shadow-lg z-50">
+                        <button 
+                            onClick={checkForConflictsAndExit}
+                            className="flex items-center"
+                        >
+                            <X size={20} className="mr-2" />
+                            退出編輯模式
+                        </button>
+                    </div>
+                )}
 
                 {filteredProducts.length === 0 ? (
                     <div className="text-center py-10 bg-white rounded-xl shadow">
@@ -466,9 +768,33 @@ function AllRecordsPage({ theme, onBack, db }) {
                             </div>
                         </div>
                         {filteredProducts.map(product => {
-                            const records = allRecords[product.numericalID] || [];
+                            // 修復：確保 records 始終有默認值
+                            const records = isEditMode ? (localRecords[product.numericalID] || []) : (allRecords[product.numericalID] || []);
                             if (records.length === 0) return null;
-                            return <ProductRecord key={product.numericalID} product={product} records={records} theme={theme} onEdit={handleEdit} onDelete={handleDelete} />;
+                            return (
+                                // 修改：為選中的項目添加增強的視覺反饋
+                                <div key={product.numericalID} className={`relative transition-all duration-200 ${isEditMode && selectedItems.has(product.numericalID) ? 'bg-blue-50 border-2 border-blue-500 rounded-lg' : ''}`}>
+                                    {isEditMode && (
+                                        <div className="absolute top-4 left-4 z-10">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedItems.has(product.numericalID)}
+                                                onChange={() => handleItemSelect(product.numericalID)}
+                                                className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                    )}
+                                    <div className={isEditMode ? "pl-12" : ""}>
+                                        <ProductRecord 
+                                            product={product} 
+                                            records={records} 
+                                            theme={theme} 
+                                            onEdit={handleEdit} 
+                                            onDelete={handleDelete} 
+                                        />
+                                    </div>
+                                </div>
+                            );
                         })}
                     </div>
                 )}
@@ -487,6 +813,63 @@ function AllRecordsPage({ theme, onBack, db }) {
                         onClose={() => setDeletingRecord(null)}
                         onConfirm={confirmDelete}
                     />
+                )}
+
+                {/* 新增批量刪除確認對話框 */}
+                {isBulkDeleteConfirmationOpen && (
+                    <BulkDeleteConfirmation
+                        count={selectedItems.size}
+                        onClose={() => setIsBulkDeleteConfirmationOpen(false)}
+                        onConfirm={deleteSelectedItems}
+                    />
+                )}
+
+                {/* 新增衝突解決對話框 */}
+                {isConflictDialogOpen && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                        <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
+                            <h2 className="text-xl font-bold mb-4">檢測到數據衝突</h2>
+                            <p className="mb-4">在您編輯期間，其他用戶修改了部分數據。請選擇如何解決衝突：</p>
+                            
+                            <div className="mb-6 p-4 bg-yellow-50 rounded-lg">
+                                <h3 className="font-semibold text-yellow-800 mb-2">衝突詳情：</h3>
+                                <ul className="list-disc pl-5 text-sm text-yellow-700">
+                                    <li>數據可能已被人修改</li>
+                                    <li>您的更改可能與其他用戶的更改衝突</li>
+                                </ul>
+                            </div>
+                            
+                            <div className="space-y-3">
+                                <button 
+                                    onClick={() => handleConflictResolution('local')}
+                                    className="w-full p-3 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+                                >
+                                    保留我的更改
+                                </button>
+                                <button 
+                                    onClick={() => handleConflictResolution('remote')}
+                                    className="w-full p-3 bg-green-500 text-white rounded-md hover:bg-green-600"
+                                >
+                                    保留最新數據
+                                </button>
+                                <button 
+                                    onClick={() => handleConflictResolution('merge')}
+                                    className="w-full p-3 bg-purple-500 text-white rounded-md hover:bg-purple-600"
+                                >
+                                    手動合併（推薦）
+                                </button>
+                            </div>
+                            
+                            <div className="mt-6 flex justify-end">
+                                <button 
+                                    onClick={() => setIsConflictDialogOpen(false)}
+                                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
+                                >
+                                    取消
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 )}
 
                 {/* --- START: Revamped Search Component --- */}
@@ -637,5 +1020,25 @@ function SuccessMessage({ message }) {
         </div>
     );
 }
+
+
+
+// 新增批量刪除確認對話框組件
+function BulkDeleteConfirmation({ count, onClose, onConfirm }) {
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
+                <h2 className="text-xl font-bold mb-4">確認批量刪除</h2>
+                <p>您確定要刪除選中的 {count} 個產品項目嗎？此操作無法復原。</p>
+                <div className="mt-6 flex justify-end space-x-3">
+                    <button onClick={onClose} className="bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300">取消</button>
+                    <button onClick={onConfirm} className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700">確認刪除</button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+
 
 export default AllRecordsPage;

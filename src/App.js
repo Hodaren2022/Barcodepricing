@@ -963,12 +963,14 @@ function App() {
                     {capturedImage && (
                         <div className="mb-6">
                             <label className="block text-gray-700 font-medium mb-2">擷取畫面 (請確認辨識資料是否正確)</label>
-                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-2 bg-gray-50">
-                                {capturedImage.startsWith('data:image') ? (
-                                    <img src={capturedImage} alt="擷取畫面" className="w-full h-auto max-h-60 object-contain rounded" />
-                                ) : (
-                                    <img src={capturedImage} alt="擷取畫面" className="w-full h-auto max-h-60 object-contain rounded" />
-                                )}
+                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-2 bg-gray-50 relative overflow-hidden">
+                                <div className="relative w-full aspect-video">
+                                    {capturedImage.startsWith('data:image') ? (
+                                        <img src={capturedImage} alt="擷取畫面" className="w-full h-full object-cover" />
+                                    ) : (
+                                        <img src={capturedImage} alt="擷取畫面" className="w-full h-full object-cover" />
+                                    )}
+                                </div>
                             </div>
                             <p className="text-sm text-gray-500 mt-2">此圖片將持續顯示直到進行下一次辨識或退出應用程式</p>
                         </div>

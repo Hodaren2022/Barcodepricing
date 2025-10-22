@@ -212,7 +212,18 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
                     <p className="text-xs text-gray-500">ID: {product.numericalID}</p>
                 </div>
                 <div className="text-right">
-                    <p className="text-2xl font-bold text-indigo-600">{isNaN(latestRecord.unitPrice) && isNaN(latestRecord.price) ? 'N/A' : `${(latestRecord.unitPrice || latestRecord.price || 0).toFixed(2)}`}</p>
+                    {/* 顯示原價和特價信息 */}
+                    {latestRecord.specialPrice ? (
+                        <div>
+                            {latestRecord.originalPrice && (
+                                <p className="text-lg text-gray-500 line-through">${latestRecord.originalPrice.toFixed(2)}</p>
+                            )}
+                            <p className="text-2xl font-bold text-indigo-600">${latestRecord.specialPrice.toFixed(2)}</p>
+                            <p className="text-xs text-gray-500">@{(latestRecord.unitPrice || 0).toFixed(2)}</p>
+                        </div>
+                    ) : (
+                        <p className="text-2xl font-bold text-indigo-600">{isNaN(latestRecord.unitPrice) && isNaN(latestRecord.price) ? 'N/A' : `${(latestRecord.unitPrice || latestRecord.price || 0).toFixed(2)}`}</p>
+                    )}
                     <p className="text-xs text-gray-500">{latestRecord.timestamp.toLocaleDateString()}</p>
                 </div>
             </div>
@@ -236,12 +247,23 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
                         >
                             <div className="flex justify-between items-center p-2 bg-gray-50 rounded">
                                 <div>
-                                    <p className="font-medium">
-                                        {isNaN(record.price) || isNaN(record.unitPrice) ?
-                                            `${(record.price || 0).toFixed(2)}@--` :
-                                            `${record.price}@${(record.unitPrice || 0).toFixed(2)}`
-                                        }
-                                    </p>
+                                    {/* 顯示原價和特價信息 */}
+                                    {record.specialPrice ? (
+                                        <p className="font-medium">
+                                            {record.originalPrice && (
+                                                <span className="text-gray-500 line-through">${record.originalPrice.toFixed(2)}</span>
+                                            )}
+                                            <span className="text-red-600 ml-1">${record.specialPrice.toFixed(2)}</span>
+                                            <span className="text-gray-500 ml-1">@{(record.unitPrice || 0).toFixed(2)}</span>
+                                        </p>
+                                    ) : (
+                                        <p className="font-medium">
+                                            {isNaN(record.price) || isNaN(record.unitPrice) ?
+                                                `${(record.price || 0).toFixed(2)}@--` :
+                                                `${record.price}@${(record.unitPrice || 0).toFixed(2)}`
+                                            }
+                                        </p>
+                                    )}
                                     {record.discountDetails && <p className="text-xs text-indigo-600">{record.discountDetails}</p>}
                                 </div>
                                 <div className="text-right">
@@ -907,6 +929,8 @@ function EditModal({ record, onClose, onSave }) {
     const [quantity, setQuantity] = useState(record.quantity || '');
     const [unitType, setUnitType] = useState(record.unitType || 'pcs');
     const [discount, setDiscount] = useState(record.discountDetails || '');
+    const [originalPrice, setOriginalPrice] = useState(record.originalPrice || '');
+    const [specialPrice, setSpecialPrice] = useState(record.specialPrice || '');
 
     const handleSave = () => {
         const newUnitPrice = calculateUnitPrice(price, quantity, unitType);
@@ -920,7 +944,9 @@ function EditModal({ record, onClose, onSave }) {
             quantity: parseFloat(quantity),
             unitType: unitType,
             unitPrice: newUnitPrice,
-            discountDetails: discount 
+            discountDetails: discount,
+            originalPrice: originalPrice ? parseFloat(originalPrice) : null,
+            specialPrice: specialPrice ? parseFloat(specialPrice) : null
         });
     };
 
@@ -931,6 +957,29 @@ function EditModal({ record, onClose, onSave }) {
             <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
                 <h2 className="text-xl font-bold mb-4">編輯記錄</h2>
                 <div className="space-y-4">
+                    {/* 原價輸入 */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">原價 ($)</label>
+                        <input
+                            type="number"
+                            value={originalPrice}
+                            onChange={(e) => setOriginalPrice(e.target.value)}
+                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                    </div>
+                    
+                    {/* 特價輸入 */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">特價 ($)</label>
+                        <input
+                            type="number"
+                            value={specialPrice}
+                            onChange={(e) => setSpecialPrice(e.target.value)}
+                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                    </div>
+                    
+                    {/* 總價輸入（實際支付價格） */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700">總價 ($)</label>
                         <input
@@ -940,6 +989,7 @@ function EditModal({ record, onClose, onSave }) {
                             className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                         />
                     </div>
+                    
                     <div>
                         <label className="block text-sm font-medium text-gray-700">數量</label>
                         <input

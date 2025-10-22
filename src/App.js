@@ -270,7 +270,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, sWidth, sHeight);
         const base64Data = canvas.toDataURL('image/jpeg', 0.9);
-        setCapturedImage(base64Data);
+        setCapturedImage(base64Data); // 設置擷取的圖片
         
         // Pause video playback after capture, but don't stop the stream
         if (videoRef.current) {
@@ -291,21 +291,21 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
         setScanError('');
         try {
             const base64Image = capturedImage.split(',')[1];
-            
-            const userQuery = "請根據圖片中的條碼、標價、產品名稱、規格（質量/容量/數量）、商店名稱和折扣資訊，以嚴格的 JSON 格式輸出結構化數據。請特別注意計算產品的總容量/總質量。如果圖像中顯示了原價和特價，請分別標註。";
-    
-            const newSchema = {
-                type: "OBJECT",
-                properties: {
-                    scannedBarcode: { "type": "STRING", "description": "影像中找到的 EAN, UPC 或其他產品條碼數字，如果不可見則為空字串。" },
-                    productName: { "type": "STRING", "description": "產品名稱，例如：家庭號牛奶" },
-                    originalPrice: { "type": "NUMBER", "description": "產品的原價（純數字，例如 59），如果沒有原價則為空。" },
-                    specialPrice: { "type": "NUMBER", "description": "產品的特價（純數字，例如 39），如果沒有特價則為空。" },
-                    listedPrice: { "type": "NUMBER", "description": "產品標價（純數字，例如 59），如果沒有單一標價則為空。當有特價時，listedPrice 應為特價；當無特價時，listedPrice 應為原價。" },
-                    totalCapacity: { "type": "NUMBER", "description": "產品的總容量/總質量/總數量（純數字）。例如：若產品是 '18克10入'，則總容量是 180；若產品是 '2000ml'，則總容量是 2000。" },
-                    baseUnit: { "type": "STRING", "description": "用於計算單價的基礎單位。僅使用 'g' (克), 'ml' (毫升), 或 'pcs' (個/入)。如果是質量，請統一使用 'g'。" },
-                    storeName: { "type": "STRING", "description": "價目標籤或收據所示的商店名稱。如果不可見則為空字串。" },
-                    discountDetails: { "type": "STRING", "description": "發現的任何促銷或折扣的詳細描述（例如：'買一送一', '第二件半價', '有效期限 2026/01/01'）。如果沒有折扣則為空字串。" }
+        
+        const userQuery = "請根據圖片中的條碼、標價、產品名稱、規格（質量/容量/數量）、商店名稱和折扣資訊，以嚴格的 JSON 格式輸出結構化數據。請特別注意計算產品的總容量/總質量。如果圖像中顯示了原價和特價，請分別標註。";
+
+        const newSchema = {
+            type: "OBJECT",
+            properties: {
+                scannedBarcode: { "type": "STRING", "description": "影像中找到的 EAN, UPC 或其他產品條碼數字，如果不可見則為空字串。" },
+                productName: { "type": "STRING", "description": "產品名稱，例如：家庭號牛奶" },
+                originalPrice: { "type": "NUMBER", "description": "產品的原價（純數字，例如 59），如果沒有原價則為空。" },
+                specialPrice: { "type": "NUMBER", "description": "產品的特價（純數字，例如 39），如果沒有特價則為空。" },
+                listedPrice: { "type": "NUMBER", "description": "產品標價（純數字，例如 59），如果沒有單一標價則為空。當有特價時，listedPrice 應為特價；當無特價時，listedPrice 應為原價。" },
+                totalCapacity: { "type": "NUMBER", "description": "產品的總容量/總質量/總數量（純數字）。例如：若產品是 '18克10入'，則總容量是 180；若產品是 '2000ml'，則總容量是 2000。" },
+                baseUnit: { "type": "STRING", "description": "用於計算單價的基礎單位。僅使用 'g' (克), 'ml' (毫升), 或 'pcs' (個/入)。如果是質量，請統一使用 'g'。" },
+                storeName: { "type": "STRING", "description": "價目標籤或收據所示的商店名稱。如果不可見則為空字串。" },
+                discountDetails: { "type": "STRING", "description": "發現的任何促銷或折扣的詳細描述（例如：'買一送一', '第二件半價', '有效期限 2026/01/01'）。如果沒有折扣則為空字串。" }
             },
             propertyOrdering: ["scannedBarcode", "productName", "originalPrice", "specialPrice", "listedPrice", "totalCapacity", "baseUnit", "storeName", "discountDetails"]
         };
@@ -355,7 +355,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
             }
         }
         
-        // 準備傳遞給父組件的數據，包含計算出的單價
+        // 準備傳遞給父組件的數據，包含計算出的單價和捕獲的圖像
         const finalData = {
             scannedBarcode: scannedBarcode,
             productName: productName,
@@ -366,7 +366,8 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
             unitType: baseUnit,
             unitPrice: unitPrice,
             specialPrice: specialPrice, // 保留特價信息
-            originalPrice: originalPrice  // 保留原價信息
+            originalPrice: originalPrice,  // 保留原價信息
+            capturedImage: capturedImage  // 添加捕獲的圖像
         };
 
         onAnalysisSuccess(finalData);
@@ -395,8 +396,11 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
             finalListedPrice = specialPrice;
         }
         
+        // 使用真實的產品標籤圖片
+        const mockImageData = "/士力架.png";
+        
         const mockResult = {
-            productName: '模擬產品名稱',
+            productName: '士力架巧克力',
             listedPrice: finalListedPrice,
             totalCapacity: randomTotalCapacity,
             baseUnit: randomBaseUnit,
@@ -416,8 +420,8 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
             unitPrice = (listedPrice / totalCapacity) * 100;
         } else if (baseUnit === 'pcs') {
             unitPrice = listedPrice / totalCapacity;
-        }
     }
+}
 
         const finalData = {
             scannedBarcode: mockResult.scannedBarcode || '',
@@ -428,7 +432,8 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
             quantity: totalCapacity.toString(),
             unitType: baseUnit,
             unitPrice: unitPrice,
-            specialPrice: mockResult.specialPrice
+            specialPrice: mockResult.specialPrice,
+            capturedImage: mockImageData  // 添加真實的產品標籤圖片
         };
 
         onAnalysisSuccess(finalData);
@@ -453,7 +458,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
                     </div>
                 )}
                 <div className="w-full">
-                    {!capturedImage && !scanError && <button onClick={handleCapture} className={`w-full p-3 mb-3 rounded-lg text-white font-semibold shadow-lg transition-all ${themePrimary} ${themeHover} flex items-center justify-center`} disabled={isAnalyzing}><Camera className="w-5 h-5 mr-2" />擷取畫面</button>}
+                    {!capturedImage && !scanError && <button onClick={handleCapture} className={`w-full p-3 mb-3 rounded-lg text-white font-semibold shadow-lg transition-all ${themePrimary} ${themeHover} flex items-center justify-center`} disabled={isAnalyzing}><Camera className="inline-block w-5 h-5 mr-2" />擷取畫面</button>}
                     {capturedImage && !scanError && (
                         <div className="grid grid-cols-2 gap-4 mb-3">
                             <button onClick={handleRetake} className="w-full p-3 rounded-lg bg-gray-500 hover:bg-gray-600 text-white font-semibold shadow-lg transition-all flex items-center justify-center" disabled={isAnalyzing}>重新拍攝</button>
@@ -578,7 +583,8 @@ function App() {
     const [isStoreSelectorOpen, setIsStoreSelectorOpen] = useState(false);
     const [currentPage, setCurrentPage] = useState('main');
     const [ocrResult, setOcrResult] = useState(null);
-
+    const [capturedImage, setCapturedImage] = useState(null); // 新增的狀態
+    
     useEffect(() => {
         // 使用新的價格計算函數來確定最終價格
         const finalPrice = calculateFinalPrice(currentPrice, ocrResult?.specialPrice);
@@ -606,6 +612,7 @@ function App() {
         setComparisonResult({ message: '等待比價數據...' });
         setOcrResult(null);
         setLookupStatus('ready');
+        setCapturedImage(null); // 清除擷取的圖片
     }, []);
 
     const stopCameraStream = useCallback(() => {
@@ -622,8 +629,10 @@ function App() {
         return () => {
             console.log("useEffect cleanup: Running camera cleanup.");
             stopCameraStream();
+            // 清除捕獲的圖像
+            setCapturedImage(null);
         };
-    }, [stopCameraStream]);
+    }, [stopCameraStream, setCapturedImage]);
 
     const startCameraStream = async () => {
         console.log("startCameraStream: Attempting to start camera.");
@@ -721,8 +730,13 @@ function App() {
     }, [statusMessage]);
 
     const handleAiCaptureSuccess = useCallback((result) => {
-        const { scannedBarcode, productName, extractedPrice, storeName, discountDetails, quantity, unitType, specialPrice } = result;
+        const { scannedBarcode, productName, extractedPrice, storeName, discountDetails, quantity, unitType, specialPrice, capturedImage: receivedImage } = result;
         setOcrResult(result);
+        
+        // 設置捕獲的圖像
+        if (receivedImage) {
+            setCapturedImage(receivedImage);
+        }
         
         const newBarcode = scannedBarcode || '';
         setBarcode(newBarcode);
@@ -750,7 +764,7 @@ function App() {
         } else {
             setLookupStatus('new');
         }
-    }, [setBarcode, setProductName, setCurrentPrice, setStoreName, setDiscountDetails, setOcrResult, setStatusMessage, setLookupStatus, setQuantity, setUnitType]);
+    }, [setBarcode, setProductName, setCurrentPrice, setStoreName, setDiscountDetails, setOcrResult, setStatusMessage, setLookupStatus, setQuantity, setUnitType, setCapturedImage]);
 
     const saveAndComparePrice = useCallback(async (selectedStore) => {
         const finalStoreName = selectedStore || storeName;
@@ -944,6 +958,22 @@ function App() {
                     </button>
                     <hr className="my-6 border-gray-200" />
                     <h2 className={`text-xl font-semibold text-gray-700 mb-4 flex items-center`}><FileText className="w-5 h-5 mr-2" />步驟 2: 檢查或手動輸入</h2>
+                    
+                    {/* 新增的擷取畫面顯示區塊 */}
+                    {capturedImage && (
+                        <div className="mb-6">
+                            <label className="block text-gray-700 font-medium mb-2">擷取畫面 (請確認辨識資料是否正確)</label>
+                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-2 bg-gray-50">
+                                {capturedImage.startsWith('data:image') ? (
+                                    <img src={capturedImage} alt="擷取畫面" className="w-full h-auto max-h-60 object-contain rounded" />
+                                ) : (
+                                    <img src={capturedImage} alt="擷取畫面" className="w-full h-auto max-h-60 object-contain rounded" />
+                                )}
+                            </div>
+                            <p className="text-sm text-gray-500 mt-2">此圖片將持續顯示直到進行下一次辨識或退出應用程式</p>
+                        </div>
+                    )}
+                    
                     <div className="mb-4">
                         <label className="block text-gray-700 font-medium mb-1">條碼數據</label>
                         <input type="text" value={barcode} onChange={(e) => setBarcode(e.target.value)} placeholder="AI 自動填入，或手動輸入" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" />

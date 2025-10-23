@@ -67,12 +67,15 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream, onQueueN
     // 更新 useEffect 以處理 stream 變化
     useEffect(() => {
         streamRef.current = stream; // 更新 streamRef 的值
-        if (stream && videoRef.current && !capturedImage) {
+        if (stream && videoRef.current) {
             videoRef.current.srcObject = stream;
-            videoRef.current.play().catch(err => {
-                console.error("Video play failed:", err);
-                setScanError("無法播放相機影像。");
-            });
+            // 只有在沒有捕獲圖片時才自動播放
+            if (!capturedImage) {
+                videoRef.current.play().catch(err => {
+                    console.error("Video play failed:", err);
+                    setScanError("無法播放相機影像。");
+                });
+            }
         }
     }, [stream, capturedImage]);
 
@@ -99,10 +102,19 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream, onQueueN
     }, []);
 
     const handleRetake = useCallback(() => {
-        // Simply clear the captured image. The useEffect will handle restarting the video.
+        // Clear the captured image and error, and restart the video stream
         setCapturedImage(null);
         setScanError('');
         setIsAnalyzing(false);
+        
+        // Manually play the video stream when retaking
+        if (streamRef.current && videoRef.current) {
+            videoRef.current.srcObject = streamRef.current;
+            videoRef.current.play().catch(err => {
+                console.error("Video play failed:", err);
+                setScanError("無法播放相機影像。");
+            });
+        }
     }, []);
 
     const handleAnalyze = useCallback(async () => {

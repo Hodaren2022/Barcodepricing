@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, Trash2, Clock, AlertCircle, CheckCircle } from 'lucide-react';
 import { db } from './firebase-config.js';
 import { doc, setDoc, addDoc, collection, serverTimestamp, getDoc, query, where, getDocs } from "firebase/firestore";
-import { calculateUnitPrice, calculateFinalPrice } from './utils/priceCalculations';
+import { calculateUnitPrice, calculateFinalPrice, formatUnitPrice } from './utils/priceCalculations';
 import StoreSelector from './StoreSelector'; // 確保導入 StoreSelector
 
 // 計算 localStorage 使用量的函數
@@ -94,7 +94,7 @@ function SaveConfirmation({ card, onClose, onConfirm }) {
                         </div>
                         <div>
                             <span className="text-gray-500">單價:</span>
-                            <span className="ml-1">@{(card.unitPrice || 0).toFixed(2)}</span>
+                            <span className="ml-1">@{formatUnitPrice(card.unitPrice)}</span>
                         </div>
                         {card.discountDetails && (
                             <div className="col-span-2">
@@ -644,7 +644,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                         {/* 單價 */}
                                         <div>
                                             <span className="text-gray-500">單價:</span>
-                                            <span className="ml-1">@{(card.unitPrice || 0).toFixed(2)}</span>
+                                            <span className="ml-1">@{formatUnitPrice(card.unitPrice)}</span>
                                         </div>
                                         
                                         {/* 優惠資訊 */}

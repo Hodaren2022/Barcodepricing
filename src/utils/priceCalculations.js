@@ -21,3 +21,29 @@ export const calculateFinalPrice = (originalPrice, specialPrice) => {
   // 如果都沒有，返回 0
   return 0;
 };
+
+/**
+ * 安全地格式化單價顯示
+ * @param {number|null|undefined} unitPrice - 單價值
+ * @returns {string} 格式化後的單價字符串
+ */
+export const formatUnitPrice = (unitPrice) => {
+  // 檢查值是否存在且不為 null 或 undefined
+  if (unitPrice == null) {
+    return '--';
+  }
+  
+  // 檢查值是否為有效數字
+  const parsedUnitPrice = parseFloat(unitPrice);
+  if (isNaN(parsedUnitPrice)) {
+    return '--';
+  }
+  
+  // 檢查是否為 0
+  if (parsedUnitPrice === 0) {
+    return '--';
+  }
+  
+  // 返回格式化後的價格
+  return parsedUnitPrice.toFixed(2);
+};

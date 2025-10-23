@@ -6,7 +6,7 @@ import AIOcrCaptureModal from './components/AIOcrCaptureModal';
 import { db } from './firebase-config.js'; // <-- 引入 Firebase
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, orderBy, serverTimestamp } from "firebase/firestore";
-import { calculateUnitPrice, calculateFinalPrice } from './utils/priceCalculations';
+import { calculateUnitPrice, calculateFinalPrice, formatUnitPrice } from './utils/priceCalculations';
 import OcrQueuePage from './OcrQueuePage';
 
 // ----------------------------------------------------------------------------
@@ -128,10 +128,10 @@ function PriceHistoryDisplay({ historyRecords, theme }) {
                                         <span className="text-gray-500 line-through">${record.originalPrice.toFixed(2)}</span>
                                     )}
                                     <span className="text-red-600 ml-2">${record.specialPrice.toFixed(2)}</span>
-                                    <span className="text-gray-500 ml-2">@{isNaN(record.unitPrice) || record.unitPrice === null || record.unitPrice === undefined || record.unitPrice === 0 ? '--' : (record.unitPrice || 0).toFixed(2)}</span>
+                                    <span className="text-gray-500 ml-2">@{formatUnitPrice(record.unitPrice)}</span>
                                 </span>
                             ) : (
-                                <span className="text-[22px] text-red-600">{`$${(record.price || 0).toFixed(2)} @${isNaN(record.unitPrice) || record.unitPrice === null || record.unitPrice === undefined || record.unitPrice === 0 ? '--' : (record.unitPrice || 0).toFixed(2)}`}</span>
+                                <span className="text-[22px] text-red-600">{`$${(record.price || 0).toFixed(2)} @${formatUnitPrice(record.unitPrice)}`}</span>
                             )}
                             <span className="text-xs text-gray-500">{record.timestamp.toLocaleString()}</span>
                         </div>
@@ -523,16 +523,17 @@ function App() {
         try {
             const productRef = doc(db, "products", numericalID.toString());
             const productSnap = await getDoc(productRef);
-            if (!productSnap.exists()) {
-                await setDoc(productRef, {
-                    numericalID,
-                    barcodeData: barcode,
-                    productName,
-                    createdAt: serverTimestamp(),
-                    lastUpdatedBy: userId,
-                });
-            }
+            
+            // 準備產品文檔數據
+            const productData = {
+                numericalID,
+                barcodeData: barcode,
+                productName,
+                createdAt: productSnap.exists() ? productSnap.data().createdAt : serverTimestamp(),
+                lastUpdatedBy: userId,
+            };
 
+            // 準備價格記錄數據
             const priceRecord = {
                 numericalID,
                 productName,
@@ -548,41 +549,62 @@ function App() {
                 originalPrice: ocrResult?.originalPrice ? parseFloat(ocrResult.originalPrice) : null,
                 specialPrice: ocrResult?.specialPrice ? parseFloat(ocrResult.specialPrice) : null
             };
-            await addDoc(collection(db, "priceRecords"), priceRecord);
-        
-            const recordsQuery = query(collection(db, "priceRecords"), where("numericalID", "==", numericalID));
-            const recordsSnap = await getDocs(recordsQuery);
-            const records = recordsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            
-            const allRecordsForCompare = [...records, { ...priceRecord, timestamp: new Date() }];
 
+            // 儲存價格記錄
+            const priceRecordDocRef = await addDoc(collection(db, "priceRecords"), priceRecord);
+            
+            // 檢查是否需要更新產品文檔中的最佳單價
+            let isBestPrice = false;
+            if (productSnap.exists()) {
+                const existingProductData = productSnap.data();
+                // 如果產品文檔中沒有 bestUnitPrice 或新價格更低，則更新
+                if (existingProductData.bestUnitPrice === undefined || calculatedUnitPrice < existingProductData.bestUnitPrice) {
+                    productData.bestUnitPrice = calculatedUnitPrice;
+                    productData.bestPriceRecordRef = priceRecordDocRef.path; // 儲存指向最佳價格記錄的引用路徑
+                    isBestPrice = true;
+                } else {
+                    // 保持現有的最佳價格信息
+                    productData.bestUnitPrice = existingProductData.bestUnitPrice;
+                    productData.bestPriceRecordRef = existingProductData.bestPriceRecordRef;
+                }
+            } else {
+                // 新產品，當前價格就是最佳價格
+                productData.bestUnitPrice = calculatedUnitPrice;
+                productData.bestPriceRecordRef = priceRecordDocRef.path;
+                isBestPrice = true;
+            }
+            
+            // 儲存或更新產品文檔
+            await setDoc(productRef, productData);
+
+            // 準備比價結果
             let toastStatus, toastMessage, isBest, bestPrice, bestStore;
 
-            if (allRecordsForCompare.length <= 1) {
+            if (isBestPrice) {
                 isBest = true;
                 bestPrice = calculatedUnitPrice;
                 bestStore = finalStoreName;
                 toastStatus = 'success';
-                toastMessage = '這是第一筆紀錄，成功建立！';
+                toastMessage = '恭喜！這是目前紀錄中的最低單價！';
             } else {
-                // 確保 unitPrice 存在且為數字，否則使用 Infinity 進行比較
-                const bestDeal = allRecordsForCompare.reduce((best, cur) => {
-                    const curUnitPrice = cur.unitPrice !== undefined && cur.unitPrice !== null ? cur.unitPrice : Infinity;
-                    const bestUnitPrice = best.unitPrice !== undefined && best.unitPrice !== null ? best.unitPrice : Infinity;
-                    return curUnitPrice < bestUnitPrice ? cur : best;
-                });
-
-                isBest = calculatedUnitPrice <= (bestDeal.unitPrice !== undefined && bestDeal.unitPrice !== null ? bestDeal.unitPrice : Infinity);
-                bestPrice = bestDeal.unitPrice;
-                bestStore = bestDeal.storeName;
+                isBest = false;
+                bestPrice = productData.bestUnitPrice;
                 
-                if (isBest) {
-                    toastStatus = 'success';
-                    toastMessage = '恭喜！這是目前紀錄中的最低單價！';
-                } else {
-                    toastStatus = 'warning';
-                    toastMessage = `非最低單價。歷史最低單價為 $${(bestDeal.unitPrice || 0).toFixed(2)} (${bestDeal.storeName})`;
+                // 從 Firestore 獲取最佳價格記錄的商店名稱
+                try {
+                    const bestPriceRecordDoc = await getDoc(doc(db, productData.bestPriceRecordRef));
+                    if (bestPriceRecordDoc.exists()) {
+                        bestStore = bestPriceRecordDoc.data().storeName;
+                    } else {
+                        bestStore = '未知商店';
+                    }
+                } catch (error) {
+                    console.error("獲取最佳價格記錄失敗:", error);
+                    bestStore = '未知商店';
                 }
+                
+                toastStatus = 'warning';
+                toastMessage = `非最低單價。歷史最低單價為 $${formatUnitPrice(productData.bestUnitPrice)} (${bestStore})`;
             }
 
             setComparisonResult({ isBest, bestPrice, bestStore, message: toastMessage });
@@ -769,7 +791,7 @@ function App() {
                             </div>
                             <div>
                                 <label className="block text-gray-700 font-medium mb-1">單價 (每100g/ml)</label>
-                                <input type="text" value={unitPrice ? unitPrice.toFixed(2) : '-'} readOnly className="w-full p-3 border border-gray-300 rounded-lg bg-gray-100" />
+                                <input type="text" value={formatUnitPrice(unitPrice)} readOnly className="w-full p-3 border border-gray-300 rounded-lg bg-gray-100" />
                             </div>
                         </div>
                         <div className="mb-6">

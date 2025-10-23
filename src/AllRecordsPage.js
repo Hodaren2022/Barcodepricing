@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffect } from 'react';
 import { ArrowLeft, Database, TrendingUp, Edit, Trash2, Save, X, CheckCircle, Search } from 'lucide-react';
 import { collection, getDocs, query, orderBy, updateDoc, deleteDoc, doc } from 'firebase/firestore';
-import { calculateUnitPrice } from './utils/priceCalculations';
+import { calculateUnitPrice, formatUnitPrice } from './utils/priceCalculations';
 
 // 圖表組件
 const CHART_WIDTH = 400;
@@ -219,10 +219,10 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
                                 <p className="text-lg text-gray-500 line-through">${latestRecord.originalPrice.toFixed(2)}</p>
                             )}
                             <p className="text-2xl font-bold text-indigo-600">${latestRecord.specialPrice.toFixed(2)}</p>
-                            <p className="text-xs text-gray-500">@{(latestRecord.unitPrice || 0).toFixed(2)}</p>
+                            <p className="text-xs text-gray-500">@{formatUnitPrice(latestRecord.unitPrice)}</p>
                         </div>
                     ) : (
-                        <p className="text-2xl font-bold text-indigo-600">{isNaN(latestRecord.unitPrice) && isNaN(latestRecord.price) ? 'N/A' : `${(latestRecord.unitPrice || latestRecord.price || 0).toFixed(2)}`}</p>
+                        <p className="text-2xl font-bold text-indigo-600">{formatUnitPrice(latestRecord.unitPrice) === '--' ? (isNaN(latestRecord.price) ? 'N/A' : `$${(latestRecord.price || 0).toFixed(2)}`) : `$${(latestRecord.price || 0).toFixed(2)} @${formatUnitPrice(latestRecord.unitPrice)}`}</p>
                     )}
                     <p className="text-xs text-gray-500">{latestRecord.timestamp.toLocaleDateString()}</p>
                 </div>
@@ -254,15 +254,10 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
                                                 <span className="text-gray-500 line-through">${record.originalPrice.toFixed(2)}</span>
                                             )}
                                             <span className="text-red-600 ml-1">${record.specialPrice.toFixed(2)}</span>
-                                            <span className="text-gray-500 ml-1">@{(record.unitPrice || 0).toFixed(2)}</span>
+                                            <span className="text-gray-500 ml-1">@{formatUnitPrice(record.unitPrice)}</span>
                                         </p>
                                     ) : (
-                                        <p className="font-medium">
-                                            {isNaN(record.price) || isNaN(record.unitPrice) ?
-                                                `${(record.price || 0).toFixed(2)}@--` :
-                                                `${record.price}@${(record.unitPrice || 0).toFixed(2)}`
-                                            }
-                                        </p>
+                                        <p className="font-medium">{`$${(record.price || 0).toFixed(2)} @${formatUnitPrice(record.unitPrice)}`}</p>
                                     )}
                                     {record.discountDetails && <p className="text-xs text-indigo-600">{record.discountDetails}</p>}
                                 </div>

@@ -860,6 +860,7 @@ function App() {
                     onBack={() => setCurrentPage('main')} 
                     pendingOcrCards={pendingOcrCards}
                     onRemoveCard={handleRemovePendingOcrCard}
+                    onStoreSelect={setPendingOcrCards}
                 />
             )}
 

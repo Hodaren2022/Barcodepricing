@@ -1,5 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Trash2, Clock, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Trash2, Clock, AlertCircle, CheckCircle } from 'lucide-react';
+import { db } from './firebase-config.js';
+import { doc, setDoc, addDoc, collection, serverTimestamp, getDoc } from "firebase/firestore";
+import { calculateUnitPrice, calculateFinalPrice } from './utils/priceCalculations';
+
+// 計算 localStorage 使用量的函數
+function getLocalStorageUsage() {
+  let total = 0;
+  for (let key in localStorage) {
+    if (localStorage.hasOwnProperty(key)) {
+      total += (localStorage[key].length + key.length) * 2; // 每個字符佔用 2 bytes
+    }
+  }
+  const used = (total / 1024).toFixed(2); // 轉換為 KB
+  const quota = 5120; // 大多数瀏覽器的 localStorage 限制約為 5MB
+  const percentage = ((used / quota) * 100).toFixed(2);
+  
+  return {
+    used: used,
+    quota: quota,
+    percentage: percentage
+  };
+}
 
 // 刪除確認對話框組件
 function DeleteConfirmation({ card, onClose, onConfirm }) {
@@ -28,15 +50,106 @@ function DeleteConfirmation({ card, onClose, onConfirm }) {
     );
 }
 
-function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard }) {
+// 儲存確認對話框組件
+function SaveConfirmation({ card, onClose, onConfirm }) {
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
+                <h2 className="text-xl font-bold mb-4">確認儲存</h2>
+                <p className="mb-4">您確定要儲存此待辨識項目嗎？</p>
+                <div className="mb-4 p-3 bg-gray-50 rounded">
+                    <h3 className="font-bold text-gray-800">{card.productName || '未命名產品'}</h3>
+                    <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
+                        <div>
+                            <span className="text-gray-500">條碼:</span>
+                            <span className="ml-1">{card.scannedBarcode || 'N/A'}</span>
+                        </div>
+                        <div>
+                            <span className="text-gray-500">商店:</span>
+                            <span className="ml-1">{card.storeName || 'N/A'}</span>
+                        </div>
+                        {card.specialPrice ? (
+                            <>
+                                {card.originalPrice && (
+                                    <div>
+                                        <span className="text-gray-500">原價:</span>
+                                        <span className="ml-1 line-through text-red-500">${parseFloat(card.originalPrice).toFixed(2)}</span>
+                                    </div>
+                                )}
+                                <div>
+                                    <span className="text-gray-500">特價:</span>
+                                    <span className="ml-1 text-green-600 font-bold">${parseFloat(card.specialPrice).toFixed(2)}</span>
+                                </div>
+                            </>
+                        ) : (
+                            <div>
+                                <span className="text-gray-500">價格:</span>
+                                <span className="ml-1">${card.extractedPrice || '0'}</span>
+                            </div>
+                        )}
+                        <div>
+                            <span className="text-gray-500">數量:</span>
+                            <span className="ml-1">{card.quantity || 'N/A'} {card.unitType || ''}</span>
+                        </div>
+                        <div>
+                            <span className="text-gray-500">單價:</span>
+                            <span className="ml-1">@{(card.unitPrice || 0).toFixed(2)}</span>
+                        </div>
+                        {card.discountDetails && (
+                            <div className="col-span-2">
+                                <span className="text-gray-500">優惠:</span>
+                                <span className="ml-1 text-indigo-600 italic">{card.discountDetails}</span>
+                            </div>
+                        )}
+                    </div>
+                </div>
+                <div className="flex justify-end space-x-3">
+                    <button 
+                        onClick={onClose}
+                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
+                    >
+                        取消
+                    </button>
+                    <button 
+                        onClick={onConfirm}
+                        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                    >
+                        確認儲存
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSelect }) {
     const [queueStats, setQueueStats] = useState({
         total: 0,
         oldest: null,
         newest: null
     });
     
+    // 新增狀態：localStorage 使用量
+    const [localStorageUsage, setLocalStorageUsage] = useState({
+        used: 0,
+        quota: 5120,
+        percentage: 0
+    });
+    
     // 新增狀態：刪除確認對話框
     const [deleteConfirmation, setDeleteConfirmation] = useState(null);
+    
+    // 新增狀態：儲存確認對話框
+    const [saveConfirmation, setSaveConfirmation] = useState(null);
+    
+    // 新增狀態：正在編輯的卡片
+    const [editingCard, setEditingCard] = useState(null);
+    
+    // 新增狀態：商店選擇器顯示狀態
+    const [showStoreSelector, setShowStoreSelector] = useState(false);
+    
+    // 新增狀態：臨時商店名稱
+    const [tempStoreName, setTempStoreName] = useState('');
 
     useEffect(() => {
         if (pendingOcrCards.length > 0) {
@@ -53,6 +166,9 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard }) {
                 newest: null
             });
         }
+        
+        // 更新 localStorage 使用量
+        setLocalStorageUsage(getLocalStorageUsage());
     }, [pendingOcrCards]);
 
     const formatTime = (timestamp) => {
@@ -86,6 +202,10 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard }) {
         if (deleteConfirmation) {
             onRemoveCard(deleteConfirmation.id);
             setDeleteConfirmation(null);
+            // 刪除後更新 localStorage 使用量
+            setTimeout(() => {
+                setLocalStorageUsage(getLocalStorageUsage());
+            }, 100);
         }
     };
 
@@ -93,6 +213,133 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard }) {
     const cancelDelete = () => {
         setDeleteConfirmation(null);
     };
+
+    // 處理儲存操作
+    const handleSaveClick = (card) => {
+        setSaveConfirmation(card);
+    };
+
+    // 確認儲存
+    const confirmSave = async () => {
+        if (saveConfirmation) {
+            try {
+                // 儲存到 Firebase
+                await saveOcrCardToFirebase(saveConfirmation);
+                
+                // 從待辨識序列中移除
+                onRemoveCard(saveConfirmation.id);
+                
+                // 儲存後更新 localStorage 使用量
+                setTimeout(() => {
+                    setLocalStorageUsage(getLocalStorageUsage());
+                }, 100);
+                
+                // 關閉對話框
+                setSaveConfirmation(null);
+            } catch (error) {
+                console.error("儲存失敗:", error);
+                alert("儲存失敗，請稍後再試");
+            }
+        }
+    };
+
+    // 取消儲存
+    const cancelSave = () => {
+        setSaveConfirmation(null);
+    };
+
+    // 處理卡片欄位變更
+    const handleCardChange = (cardId, field, value) => {
+        const updatedCards = pendingOcrCards.map(card => 
+            card.id === cardId ? { ...card, [field]: value } : card
+        );
+        onStoreSelect(updatedCards);
+    };
+
+    // 處理商店欄位點擊
+    const handleStoreClick = (card) => {
+        setEditingCard(card);
+        setTempStoreName(card.storeName || '');
+        setShowStoreSelector(true);
+    };
+
+    // 處理商店選擇器關閉
+    const handleCloseStoreSelector = () => {
+        setShowStoreSelector(false);
+        setEditingCard(null);
+        setTempStoreName('');
+    };
+
+    // 處理商店選擇器確認
+    const handleConfirmStoreSelector = () => {
+        if (editingCard) {
+            handleCardChange(editingCard.id, 'storeName', tempStoreName);
+        }
+        handleCloseStoreSelector();
+    };
+
+    // 儲存 OCR 卡片到 Firebase
+    const saveOcrCardToFirebase = async (card) => {
+        // 生成產品 ID
+        const numericalID = generateProductId(card.scannedBarcode, card.productName, card.storeName);
+        
+        // 使用新的價格計算函數來確定最終價格
+        const finalPrice = calculateFinalPrice(card.extractedPrice, card.specialPrice);
+        const priceValue = parseFloat(finalPrice);
+        
+        // 使用 calculateUnitPrice 函數計算單價
+        const calculatedUnitPrice = calculateUnitPrice(priceValue, card.quantity, card.unitType);
+        
+        // 儲存產品資訊
+        const productRef = doc(db, "products", numericalID.toString());
+        const productSnap = await getDoc(productRef);
+        if (!productSnap.exists()) {
+            await setDoc(productRef, {
+                numericalID,
+                barcodeData: card.scannedBarcode,
+                productName: card.productName,
+                createdAt: serverTimestamp(),
+                lastUpdatedBy: "ocr-queue", // 標記為來自 OCR 隊列
+            });
+        }
+        
+        // 儲存價格記錄
+        const priceRecord = {
+            numericalID,
+            productName: card.productName,
+            storeName: card.storeName,
+            price: priceValue, // 總價
+            quantity: parseFloat(card.quantity),
+            unitType: card.unitType,
+            unitPrice: calculatedUnitPrice, // 單價
+            discountDetails: card.discountDetails || '',
+            timestamp: serverTimestamp(),
+            recordedBy: "ocr-queue", // 標記為來自 OCR 隊列
+            // 保存原價和特價信息（如果有的話）
+            originalPrice: card.originalPrice ? parseFloat(card.originalPrice) : null,
+            specialPrice: card.specialPrice ? parseFloat(card.specialPrice) : null
+        };
+        
+        await addDoc(collection(db, "priceRecords"), priceRecord);
+    };
+
+    // 生成產品 ID 的函數
+    function generateProductId(barcode, productName, storeName) {
+        function djb2Hash(str) {
+            let hash = 5381;
+            for (let i = 0; i < str.length; i++) {
+                hash = ((hash << 5) + hash) + str.charCodeAt(i);
+            }
+            return hash >>> 0;
+        }
+        
+        if (barcode) {
+            return djb2Hash(barcode).toString();
+        } else {
+            // Combine productName and storeName to create a unique ID for products without barcodes
+            return djb2Hash(`${productName}-${storeName}`).toString();
+        }
+    }
 
     return (
         <div className={`min-h-screen p-4 sm:p-8 ${theme.light}`}>
@@ -123,12 +370,74 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard }) {
                                 <p className="text-lg font-bold text-purple-600">{queueStats.newest ? formatTime(queueStats.newest) : 'N/A'}</p>
                             </div>
                         </div>
+                        
+                        {/* localStorage 使用量顯示 */}
+                        <div className="mt-4 pt-4 border-t border-gray-200">
+                            <h3 className="text-md font-semibold mb-2">儲存空間使用量</h3>
+                            <div className="flex items-center">
+                                <div className="flex-1 mr-4">
+                                    <div className="w-full bg-gray-200 rounded-full h-2.5">
+                                        <div 
+                                            className="bg-blue-600 h-2.5 rounded-full" 
+                                            style={{ width: `${localStorageUsage.percentage > 100 ? 100 : localStorageUsage.percentage}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                                <div className="text-sm text-gray-600 whitespace-nowrap">
+                                    <span>{localStorageUsage.used} KB</span>
+                                    <span className="mx-1">/</span>
+                                    <span>{localStorageUsage.quota} KB</span>
+                                    <span className="ml-1">({localStorageUsage.percentage}%)</span>
+                                </div>
+                            </div>
+                            {localStorageUsage.percentage > 90 && (
+                                <div className="mt-2 text-sm text-yellow-600">
+                                    ⚠️ 儲存空間使用率已超過 90%，請及時清理不需要的項目
+                                </div>
+                            )}
+                            {localStorageUsage.percentage > 100 && (
+                                <div className="mt-2 text-sm text-red-600">
+                                    ❌ 儲存空間已滿，無法新增更多項目
+                                </div>
+                            )}
+                        </div>
                     </div>
                 ) : (
                     <div className="text-center py-10 bg-white rounded-xl shadow">
                         <AlertCircle size={48} className="mx-auto text-gray-400 mb-4" />
                         <h3 className="text-xl font-semibold text-gray-700 mb-2">無待辨識項目</h3>
                         <p className="text-gray-500">目前沒有任何待確認的辨識卡片</p>
+                        
+                        {/* localStorage 使用量顯示（即使沒有項目也顯示） */}
+                        <div className="mt-6 pt-4 border-t border-gray-200">
+                            <h3 className="text-md font-semibold mb-2">儲存空間使用量</h3>
+                            <div className="flex items-center">
+                                <div className="flex-1 mr-4">
+                                    <div className="w-full bg-gray-200 rounded-full h-2.5">
+                                        <div 
+                                            className="bg-blue-600 h-2.5 rounded-full" 
+                                            style={{ width: `${localStorageUsage.percentage > 100 ? 100 : localStorageUsage.percentage}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                                <div className="text-sm text-gray-600 whitespace-nowrap">
+                                    <span>{localStorageUsage.used} KB</span>
+                                    <span className="mx-1">/</span>
+                                    <span>{localStorageUsage.quota} KB</span>
+                                    <span className="ml-1">({localStorageUsage.percentage}%)</span>
+                                </div>
+                            </div>
+                            {localStorageUsage.percentage > 90 && (
+                                <div className="mt-2 text-sm text-yellow-600">
+                                    ⚠️ 儲存空間使用率已超過 90%，請及時清理不需要的項目
+                                </div>
+                            )}
+                            {localStorageUsage.percentage > 100 && (
+                                <div className="mt-2 text-sm text-red-600">
+                                    ❌ 儲存空間已滿，無法新增更多項目
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
 
@@ -137,7 +446,13 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard }) {
                         <div key={card.id} className="bg-white p-4 rounded-lg shadow border-l-4 border-blue-500">
                             <div className="flex justify-between items-start">
                                 <div className="flex-1">
-                                    <h3 className="font-bold text-lg text-gray-800">{card.productName || '未命名產品'}</h3>
+                                    <input
+                                        type="text"
+                                        value={card.productName || ''}
+                                        onChange={(e) => handleCardChange(card.id, 'productName', e.target.value)}
+                                        className="font-bold text-lg text-gray-800 w-full p-1 mb-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none"
+                                        placeholder="產品名稱"
+                                    />
                                     
                                     {/* 擷取畫面顯示 */}
                                     {card.capturedImage && (
@@ -155,62 +470,128 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard }) {
                                     )}
                                     
                                     <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
-                                        {/* 顯示與主畫面一致的欄位 */}
+                                        {/* 條碼欄位 */}
                                         <div>
                                             <span className="text-gray-500">條碼:</span>
-                                            <span className="ml-1">{card.scannedBarcode || 'N/A'}</span>
+                                            <input
+                                                type="text"
+                                                value={card.scannedBarcode || ''}
+                                                onChange={(e) => handleCardChange(card.id, 'scannedBarcode', e.target.value)}
+                                                className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none w-24"
+                                                placeholder="條碼"
+                                            />
                                         </div>
+                                        
+                                        {/* 商店欄位 */}
                                         <div>
                                             <span className="text-gray-500">商店:</span>
-                                            <span className="ml-1">{card.storeName || 'N/A'}</span>
+                                            <input
+                                                type="text"
+                                                value={card.storeName || ''}
+                                                onChange={(e) => handleCardChange(card.id, 'storeName', e.target.value)}
+                                                onClick={() => handleStoreClick(card)}
+                                                className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none w-24"
+                                                placeholder="選擇商店"
+                                            />
                                         </div>
-                                        {/* 顯示原價和特價信息 */}
-                                        {card.specialPrice ? (
+                                        
+                                        {/* 原價和特價信息 */}
+                                        {card.specialPrice !== undefined ? (
                                             <>
-                                                {card.originalPrice && (
-                                                    <div>
-                                                        <span className="text-gray-500">原價:</span>
-                                                        <span className="ml-1 line-through text-red-500">${parseFloat(card.originalPrice).toFixed(2)}</span>
-                                                    </div>
-                                                )}
+                                                <div>
+                                                    <span className="text-gray-500">原價:</span>
+                                                    <input
+                                                        type="number"
+                                                        value={card.originalPrice || ''}
+                                                        onChange={(e) => handleCardChange(card.id, 'originalPrice', e.target.value)}
+                                                        className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none w-20"
+                                                        placeholder="原價"
+                                                    />
+                                                </div>
                                                 <div>
                                                     <span className="text-gray-500">特價:</span>
-                                                    <span className="ml-1 text-green-600 font-bold">${parseFloat(card.specialPrice).toFixed(2)}</span>
+                                                    <input
+                                                        type="number"
+                                                        value={card.specialPrice || ''}
+                                                        onChange={(e) => handleCardChange(card.id, 'specialPrice', e.target.value)}
+                                                        className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none w-20 text-green-600 font-bold"
+                                                        placeholder="特價"
+                                                    />
                                                 </div>
                                             </>
                                         ) : (
                                             <div>
                                                 <span className="text-gray-500">價格:</span>
-                                                <span className="ml-1">${card.extractedPrice || '0'}</span>
+                                                <input
+                                                    type="number"
+                                                    value={card.extractedPrice || ''}
+                                                    onChange={(e) => handleCardChange(card.id, 'extractedPrice', e.target.value)}
+                                                    className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none w-20"
+                                                    placeholder="價格"
+                                                />
                                             </div>
                                         )}
+                                        
+                                        {/* 數量和單位 */}
                                         <div>
                                             <span className="text-gray-500">數量:</span>
-                                            <span className="ml-1">{card.quantity || 'N/A'} {card.unitType || ''}</span>
+                                            <input
+                                                type="text"
+                                                value={card.quantity || ''}
+                                                onChange={(e) => handleCardChange(card.id, 'quantity', e.target.value)}
+                                                className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none w-16"
+                                                placeholder="數量"
+                                            />
+                                            <select
+                                                value={card.unitType || 'pcs'}
+                                                onChange={(e) => handleCardChange(card.id, 'unitType', e.target.value)}
+                                                className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none"
+                                            >
+                                                <option value="ml">ml</option>
+                                                <option value="g">g</option>
+                                                <option value="pcs">pcs</option>
+                                            </select>
                                         </div>
+                                        
+                                        {/* 單價 */}
                                         <div>
                                             <span className="text-gray-500">單價:</span>
                                             <span className="ml-1">@{(card.unitPrice || 0).toFixed(2)}</span>
                                         </div>
-                                        {card.discountDetails && (
-                                            <div className="col-span-2">
-                                                <span className="text-gray-500">優惠:</span>
-                                                <span className="ml-1 text-indigo-600 italic">{card.discountDetails}</span>
-                                            </div>
-                                        )}
+                                        
+                                        {/* 優惠資訊 */}
+                                        <div className="col-span-2">
+                                            <span className="text-gray-500">優惠:</span>
+                                            <input
+                                                type="text"
+                                                value={card.discountDetails || ''}
+                                                onChange={(e) => handleCardChange(card.id, 'discountDetails', e.target.value)}
+                                                className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none w-full"
+                                                placeholder="優惠資訊"
+                                            />
+                                        </div>
                                     </div>
                                     <div className="mt-2 text-xs text-gray-500">
                                         <p>加入時間: {formatTime(card.id)}</p>
                                         <p>運行時間: {calculateDuration(card.id)}</p>
                                     </div>
                                 </div>
-                                <button 
-                                    onClick={() => handleDeleteClick(card)}
-                                    className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-full"
-                                    title="刪除"
-                                >
-                                    <Trash2 size={20} />
-                                </button>
+                                <div className="flex flex-col space-y-2">
+                                    <button 
+                                        onClick={() => handleSaveClick(card)}
+                                        className="p-2 text-green-500 hover:text-green-700 hover:bg-green-50 rounded-full"
+                                        title="確認儲存"
+                                    >
+                                        <CheckCircle size={20} />
+                                    </button>
+                                    <button 
+                                        onClick={() => handleDeleteClick(card)}
+                                        className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-full"
+                                        title="刪除"
+                                    >
+                                        <Trash2 size={20} />
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     ))}
@@ -224,6 +605,47 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard }) {
                     onClose={cancelDelete}
                     onConfirm={confirmDelete}
                 />
+            )}
+            
+            {/* 儲存確認對話框 */}
+            {saveConfirmation && (
+                <SaveConfirmation 
+                    card={saveConfirmation}
+                    onClose={cancelSave}
+                    onConfirm={confirmSave}
+                />
+            )}
+            
+            {/* 商店選擇器對話框 */}
+            {showStoreSelector && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
+                        <h2 className="text-xl font-bold mb-4">選擇商店</h2>
+                        <div className="mb-4">
+                            <input
+                                type="text"
+                                value={tempStoreName}
+                                onChange={(e) => setTempStoreName(e.target.value)}
+                                placeholder="輸入商店名稱"
+                                className="w-full p-2 border border-gray-300 rounded"
+                            />
+                        </div>
+                        <div className="flex justify-end space-x-3">
+                            <button 
+                                onClick={handleCloseStoreSelector}
+                                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
+                            >
+                                取消
+                            </button>
+                            <button 
+                                onClick={handleConfirmStoreSelector}
+                                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                            >
+                                確定
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

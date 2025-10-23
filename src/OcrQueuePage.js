@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Trash2, Clock, AlertCircle, CheckCircle } from 'lucide-react';
 import { db } from './firebase-config.js';
-import { doc, setDoc, addDoc, collection, serverTimestamp, getDoc } from "firebase/firestore";
+import { doc, setDoc, addDoc, collection, serverTimestamp, getDoc, query, where, getDocs, orderBy } from "firebase/firestore";
 import { calculateUnitPrice, calculateFinalPrice } from './utils/priceCalculations';
+import StoreSelector from './StoreSelector'; // 確保導入 StoreSelector
 
 // 計算 localStorage 使用量的函數
 function getLocalStorageUsage() {
@@ -148,8 +149,8 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     // 新增狀態：商店選擇器顯示狀態
     const [showStoreSelector, setShowStoreSelector] = useState(false);
     
-    // 新增狀態：臨時商店名稱
-    const [tempStoreName, setTempStoreName] = useState('');
+    // 新增狀態：比價結果
+    const [priceComparisonResults, setPriceComparisonResults] = useState({});
 
     useEffect(() => {
         if (pendingOcrCards.length > 0) {
@@ -259,7 +260,6 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     // 處理商店欄位點擊
     const handleStoreClick = (card) => {
         setEditingCard(card);
-        setTempStoreName(card.storeName || '');
         setShowStoreSelector(true);
     };
 
@@ -267,15 +267,14 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     const handleCloseStoreSelector = () => {
         setShowStoreSelector(false);
         setEditingCard(null);
-        setTempStoreName('');
     };
 
-    // 處理商店選擇器確認
-    const handleConfirmStoreSelector = () => {
+    // 處理商店選擇（自動套用選擇並關閉選擇器）
+    const handleStoreSelectForQueue = (selectedStore) => {
         if (editingCard) {
-            handleCardChange(editingCard.id, 'storeName', tempStoreName);
+            handleCardChange(editingCard.id, 'storeName', selectedStore);
         }
-        handleCloseStoreSelector();
+        handleCloseStoreSelector(); // 自動關閉選擇器
     };
 
     // 儲存 OCR 卡片到 Firebase
@@ -341,6 +340,81 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
         }
     }
 
+    // 新增函數：檢查價格是否為歷史最低
+    const checkIfBestPrice = async (card) => {
+        try {
+            // 生成產品 ID
+            const numericalID = generateProductId(card.scannedBarcode, card.productName, card.storeName);
+            
+            if (!numericalID) return null;
+            
+            // 使用新的價格計算函數來確定最終價格
+            const finalPrice = calculateFinalPrice(card.extractedPrice, card.specialPrice);
+            const priceValue = parseFloat(finalPrice);
+            
+            // 使用 calculateUnitPrice 函數計算單價
+            const calculatedUnitPrice = calculateUnitPrice(priceValue, card.quantity, card.unitType);
+            
+            if (calculatedUnitPrice === null) return null;
+            
+            // 查詢 Firebase 中該產品的所有價格記錄
+            const recordsQuery = query(
+                collection(db, "priceRecords"),
+                where("numericalID", "==", numericalID)
+            );
+            
+            const recordsSnap = await getDocs(recordsQuery);
+            const records = recordsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            
+            // 準備所有記錄以進行比較（包括當前記錄）
+            const allRecordsForCompare = [...records, { 
+                unitPrice: calculatedUnitPrice,
+                timestamp: new Date()
+            }];
+
+            // 如果沒有歷史記錄，則當前價格就是最低價
+            if (allRecordsForCompare.length <= 1) {
+                return { isBest: true, message: "歷史最低價", backgroundColor: "bg-green-100" };
+            }
+            
+            // 使用與主頁面相同的比價邏輯
+            const bestDeal = allRecordsForCompare.reduce((best, cur) => {
+                const curUnitPrice = cur.unitPrice !== undefined && cur.unitPrice !== null ? cur.unitPrice : Infinity;
+                const bestUnitPrice = best.unitPrice !== undefined && best.unitPrice !== null ? best.unitPrice : Infinity;
+                return curUnitPrice < bestUnitPrice ? cur : best;
+            });
+
+            const isBest = calculatedUnitPrice <= (bestDeal.unitPrice !== undefined && bestDeal.unitPrice !== null ? bestDeal.unitPrice : Infinity);
+            
+            if (isBest) {
+                return { isBest: true, message: "歷史最低價", backgroundColor: "bg-green-100" };
+            } else {
+                return { isBest: false, message: "非歷史最低價", backgroundColor: "bg-yellow-100" };
+            }
+        } catch (error) {
+            console.error("比價檢查失敗:", error);
+            return null;
+        }
+    };
+
+    // 當待辨識卡片列表改變時，重新計算比價結果
+    useEffect(() => {
+        const fetchPriceComparisonResults = async () => {
+            const results = {};
+            for (const card of pendingOcrCards) {
+                const result = await checkIfBestPrice(card);
+                results[card.id] = result;
+            }
+            setPriceComparisonResults(results);
+        };
+        
+        if (pendingOcrCards.length > 0) {
+            fetchPriceComparisonResults();
+        } else {
+            setPriceComparisonResults({});
+        }
+    }, [pendingOcrCards]);
+
     return (
         <div className={`min-h-screen p-4 sm:p-8 ${theme.light}`}>
             <div className="max-w-2xl mx-auto">
@@ -355,19 +429,28 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
 
                 {queueStats.total > 0 ? (
                     <div className="mb-6 p-4 bg-white rounded-lg shadow">
-                        <h2 className="text-lg font-semibold mb-2">序列統計</h2>
-                        <div className="grid grid-cols-3 gap-4">
-                            <div className="bg-blue-50 p-3 rounded text-center">
-                                <p className="text-sm text-gray-600">總數</p>
-                                <p className="text-2xl font-bold text-blue-600">{queueStats.total}</p>
+                        <h2 className="text-lg font-semibold mb-3">序列統計</h2>
+                        {/* 改為橫式條列呈現 */}
+                        <div className="flex flex-wrap gap-4">
+                            <div className="flex items-center">
+                                <div className="bg-blue-100 p-2 rounded-full mr-2">
+                                    <span className="text-blue-600 font-bold">{queueStats.total}</span>
+                                </div>
+                                <span className="text-gray-600">總數</span>
                             </div>
-                            <div className="bg-green-50 p-3 rounded text-center">
-                                <p className="text-sm text-gray-600">最早</p>
-                                <p className="text-lg font-bold text-green-600">{queueStats.oldest ? formatTime(queueStats.oldest) : 'N/A'}</p>
+                            
+                            <div className="flex items-center">
+                                <div className="bg-green-100 p-2 rounded-full mr-2">
+                                    <span className="text-green-600 font-bold">{queueStats.oldest ? formatTime(queueStats.oldest) : 'N/A'}</span>
+                                </div>
+                                <span className="text-gray-600">最早</span>
                             </div>
-                            <div className="bg-purple-50 p-3 rounded text-center">
-                                <p className="text-sm text-gray-600">最新</p>
-                                <p className="text-lg font-bold text-purple-600">{queueStats.newest ? formatTime(queueStats.newest) : 'N/A'}</p>
+                            
+                            <div className="flex items-center">
+                                <div className="bg-purple-100 p-2 rounded-full mr-2">
+                                    <span className="text-purple-600 font-bold">{queueStats.newest ? formatTime(queueStats.newest) : 'N/A'}</span>
+                                </div>
+                                <span className="text-gray-600">最新</span>
                             </div>
                         </div>
                         
@@ -443,7 +526,12 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
 
                 <div className="space-y-4">
                     {pendingOcrCards.map((card) => (
-                        <div key={card.id} className="bg-white p-4 rounded-lg shadow border-l-4 border-blue-500">
+                        <div 
+                            key={card.id} 
+                            className={`bg-white p-4 rounded-lg shadow border-l-4 border-blue-500 ${
+                                priceComparisonResults[card.id]?.backgroundColor || ''
+                            }`}
+                        >
                             <div className="flex justify-between items-start">
                                 <div className="flex-1">
                                     <input
@@ -571,6 +659,18 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                             />
                                         </div>
                                     </div>
+                                    
+                                    {/* 新增比價結果顯示 */}
+                                    {priceComparisonResults[card.id] && (
+                                        <div className={`mt-2 p-2 rounded text-center text-sm font-medium ${
+                                            priceComparisonResults[card.id].isBest 
+                                                ? 'text-green-800 bg-green-200' 
+                                                : 'text-yellow-800 bg-yellow-200'
+                                        }`}>
+                                            {priceComparisonResults[card.id].message}
+                                        </div>
+                                    )}
+                                    
                                     <div className="mt-2 text-xs text-gray-500">
                                         <p>加入時間: {formatTime(card.id)}</p>
                                         <p>運行時間: {calculateDuration(card.id)}</p>
@@ -616,36 +716,13 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                 />
             )}
             
-            {/* 商店選擇器對話框 */}
+            {/* 商店選擇器對話框 - 為待辨識序列管理頁面定制 */}
             {showStoreSelector && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
-                        <h2 className="text-xl font-bold mb-4">選擇商店</h2>
-                        <div className="mb-4">
-                            <input
-                                type="text"
-                                value={tempStoreName}
-                                onChange={(e) => setTempStoreName(e.target.value)}
-                                placeholder="輸入商店名稱"
-                                className="w-full p-2 border border-gray-300 rounded"
-                            />
-                        </div>
-                        <div className="flex justify-end space-x-3">
-                            <button 
-                                onClick={handleCloseStoreSelector}
-                                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
-                            >
-                                取消
-                            </button>
-                            <button 
-                                onClick={handleConfirmStoreSelector}
-                                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
-                            >
-                                確定
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <StoreSelector 
+                    theme={theme} 
+                    onSelect={handleStoreSelectForQueue} 
+                    onClose={handleCloseStoreSelector} 
+                />
             )}
         </div>
     );

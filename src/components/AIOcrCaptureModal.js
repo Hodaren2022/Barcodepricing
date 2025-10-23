@@ -303,15 +303,25 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream, onQueueN
             // 將該擷取畫面排進辨識序列中
             onQueueNextCapture(finalData);
             
-            // 開始下一輪畫面擷取與辨識動作
-            handleRetake();
+            // 清除捕獲的圖像並重新啟動相機
+            setCapturedImage(null);
+            setScanError('');
+            setIsAnalyzing(false);
+            
+            // 重新啟動相機流
+            if (streamRef.current && videoRef.current) {
+                videoRef.current.srcObject = streamRef.current;
+                videoRef.current.play().catch(err => {
+                    console.error("Video play failed:", err);
+                    setScanError("無法播放相機影像。");
+                });
+            }
         } catch (error) {
             console.error("AI 分析失敗:", error);
             setScanError(`AI 分析錯誤: ${error.message}`);
-        } finally {
             setIsAnalyzing(false);
         }
-    }, [capturedImage, onQueueNextCapture, handleRetake]);
+    }, [capturedImage, onQueueNextCapture]);
 
     const handleSimulatedAnalysis = () => {
         const randomListedPrice = parseFloat((Math.random() * 50 + 100).toFixed(2));

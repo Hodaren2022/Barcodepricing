@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Trash2, Clock, AlertCircle, CheckCircle } from 'lucide-react';
 import { db } from './firebase-config.js';
-import { doc, setDoc, addDoc, collection, serverTimestamp, getDoc, query, where, getDocs, orderBy } from "firebase/firestore";
+import { doc, setDoc, addDoc, collection, serverTimestamp, getDoc, query, where, getDocs } from "firebase/firestore";
 import { calculateUnitPrice, calculateFinalPrice } from './utils/priceCalculations';
 import StoreSelector from './StoreSelector'; // 確保導入 StoreSelector
 
@@ -413,7 +413,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
         } else {
             setPriceComparisonResults({});
         }
-    }, [pendingOcrCards]);
+    }, [pendingOcrCards, checkIfBestPrice]);
 
     return (
         <div className={`min-h-screen p-4 sm:p-8 ${theme.light}`}>

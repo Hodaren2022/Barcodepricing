@@ -493,38 +493,6 @@ function App() {
         setStatusMessage(`已將辨識結果加入待確認序列！`);
     }, []);
 
-    // 新增函數：處理待確認的辨識卡片
-    const handleProcessPendingOcrCard = useCallback((card) => {
-        // 設置表單數據
-        setOcrResult(card);
-        setCapturedImage(card.capturedImage);
-        setBarcode(card.scannedBarcode || '');
-        setProductName(card.productName || '');
-        setCurrentPrice(card.extractedPrice || '');
-        setStoreName(card.storeName || '');
-        setDiscountDetails(card.discountDetails || '');
-        setQuantity(card.quantity || '');
-        setUnitType(card.unitType || 'pcs');
-        
-        // 計算單價
-        const priceValue = parseFloat(card.extractedPrice);
-        const qty = parseFloat(card.quantity);
-        if (!isNaN(priceValue) && !isNaN(qty) && qty > 0) {
-            const calculatedUnitPrice = calculateUnitPrice(priceValue, qty, card.unitType);
-            setUnitPrice(calculatedUnitPrice);
-        }
-        
-        // 更新狀態
-        if (card.productName && card.scannedBarcode) {
-            setLookupStatus('found');
-        } else {
-            setLookupStatus('new');
-        }
-        
-        // 從待確認序列中移除該卡片
-        setPendingOcrCards(prev => prev.filter(item => item.id !== card.id));
-    }, [setOcrResult, setCapturedImage, setBarcode, setProductName, setCurrentPrice, setStoreName, setDiscountDetails, setQuantity, setUnitType, setUnitPrice, setLookupStatus]);
-
     // 新增函數：移除待確認的辨識卡片
     const handleRemovePendingOcrCard = useCallback((cardId) => {
         setPendingOcrCards(prev => prev.filter(item => item.id !== cardId));
@@ -686,7 +654,44 @@ function App() {
                         <div className="flex items-center space-x-3">
                             {/* 新增待確認的辨識按鈕 */}
                             <button 
-                                onClick={() => setCurrentPage('ocrQueue')}
+                                onClick={() => {
+                                    // 如果有待確認的卡片，處理第一個
+                                    if (pendingOcrCards.length > 0) {
+                                        // 重新添加 handleProcessPendingOcrCard 函數並調用它
+                                        const processPendingOcrCard = (card) => {
+                                            // 設置表單數據
+                                            setOcrResult(card);
+                                            setCapturedImage(card.capturedImage);
+                                            setBarcode(card.scannedBarcode || '');
+                                            setProductName(card.productName || '');
+                                            setCurrentPrice(card.extractedPrice || '');
+                                            setStoreName(card.storeName || '');
+                                            setDiscountDetails(card.discountDetails || '');
+                                            setQuantity(card.quantity || '');
+                                            setUnitType(card.unitType || 'pcs');
+                                            
+                                            // 計算單價
+                                            const priceValue = parseFloat(card.extractedPrice);
+                                            const qty = parseFloat(card.quantity);
+                                            if (!isNaN(priceValue) && !isNaN(qty) && qty > 0) {
+                                                const calculatedUnitPrice = calculateUnitPrice(priceValue, qty, card.unitType);
+                                                setUnitPrice(calculatedUnitPrice);
+                                            }
+                                            
+                                            // 更新狀態
+                                            if (card.productName && card.scannedBarcode) {
+                                                setLookupStatus('found');
+                                            } else {
+                                                setLookupStatus('new');
+                                            }
+                                            
+                                            // 從待確認序列中移除該卡片
+                                            setPendingOcrCards(prev => prev.filter(item => item.id !== card.id));
+                                        };
+                                        
+                                        processPendingOcrCard(pendingOcrCards[0]);
+                                    }
+                                }}
                                 className={`relative p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`}
                                 title={`待確認的辨識 (${pendingOcrCards.length})`}
                             >

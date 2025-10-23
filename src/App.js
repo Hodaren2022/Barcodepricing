@@ -7,6 +7,7 @@ import { db } from './firebase-config.js'; // <-- 引入 Firebase
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, orderBy, serverTimestamp } from "firebase/firestore";
 import { calculateUnitPrice, calculateFinalPrice } from './utils/priceCalculations';
+import OcrQueuePage from './OcrQueuePage';
 
 // ----------------------------------------------------------------------------
 // 1. 核心設定與工具函數 (Core Setup & Utilities)
@@ -297,9 +298,12 @@ function App() {
     const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
     const [isCaptureModalOpen, setIsCaptureModalOpen] = useState(false);
     const [isStoreSelectorOpen, setIsStoreSelectorOpen] = useState(false);
-    const [currentPage, setCurrentPage] = useState('main');
+    const [currentPage, setCurrentPage] = useState('main'); // 'main', 'allRecords', 'ocrQueue'
     const [ocrResult, setOcrResult] = useState(null);
     const [capturedImage, setCapturedImage] = useState(null); // 新增的狀態
+    
+    // 新增狀態：待辨識序列
+    const [pendingOcrCards, setPendingOcrCards] = useState([]);
     
     useEffect(() => {
         // 使用新的價格計算函數來確定最終價格
@@ -472,8 +476,8 @@ function App() {
         setStoreName(storeName || '');
         setDiscountDetails(discountDetails || '');
 
-        setQuantity(quantity || ''); // 直接使用從 AI 辨識結果中獲取的 quantity
-        setUnitType(unitType || 'pcs'); // 直接使用從 AI 辨識結果中獲取的 unitType，或預設為 'pcs'
+        setQuantity(quantity || '');
+        setUnitType(unitType || 'pcs');
 
         if (productName && newBarcode) {
             setLookupStatus('found');
@@ -481,6 +485,50 @@ function App() {
             setLookupStatus('new');
         }
     }, [setBarcode, setProductName, setCurrentPrice, setStoreName, setDiscountDetails, setOcrResult, setStatusMessage, setLookupStatus, setQuantity, setUnitType, setCapturedImage]);
+
+    // 新增函數：將辨識結果加入待確認序列
+    const handleQueueNextCapture = useCallback((result) => {
+        // 將結果加入待確認的辨識卡片中
+        setPendingOcrCards(prev => [...prev, { ...result, id: Date.now() }]);
+        setStatusMessage(`已將辨識結果加入待確認序列！`);
+    }, []);
+
+    // 新增函數：處理待確認的辨識卡片
+    const handleProcessPendingOcrCard = useCallback((card) => {
+        // 設置表單數據
+        setOcrResult(card);
+        setCapturedImage(card.capturedImage);
+        setBarcode(card.scannedBarcode || '');
+        setProductName(card.productName || '');
+        setCurrentPrice(card.extractedPrice || '');
+        setStoreName(card.storeName || '');
+        setDiscountDetails(card.discountDetails || '');
+        setQuantity(card.quantity || '');
+        setUnitType(card.unitType || 'pcs');
+        
+        // 計算單價
+        const priceValue = parseFloat(card.extractedPrice);
+        const qty = parseFloat(card.quantity);
+        if (!isNaN(priceValue) && !isNaN(qty) && qty > 0) {
+            const calculatedUnitPrice = calculateUnitPrice(priceValue, qty, card.unitType);
+            setUnitPrice(calculatedUnitPrice);
+        }
+        
+        // 更新狀態
+        if (card.productName && card.scannedBarcode) {
+            setLookupStatus('found');
+        } else {
+            setLookupStatus('new');
+        }
+        
+        // 從待確認序列中移除該卡片
+        setPendingOcrCards(prev => prev.filter(item => item.id !== card.id));
+    }, [setOcrResult, setCapturedImage, setBarcode, setProductName, setCurrentPrice, setStoreName, setDiscountDetails, setQuantity, setUnitType, setUnitPrice, setLookupStatus]);
+
+    // 新增函數：移除待確認的辨識卡片
+    const handleRemovePendingOcrCard = useCallback((cardId) => {
+        setPendingOcrCards(prev => prev.filter(item => item.id !== cardId));
+    }, []);
 
     const saveAndComparePrice = useCallback(async (selectedStore) => {
         const finalStoreName = selectedStore || storeName;
@@ -598,6 +646,9 @@ function App() {
         const stream = await startCameraStream();
         if (stream) {
             setIsCaptureModalOpen(true);
+        } else {
+            // 如果無法啟動相機，顯示錯誤訊息
+            setStatusMessage("無法啟動相機，請檢查權限設置");
         }
     };
 
@@ -626,142 +677,172 @@ function App() {
     return (
         <div className={`min-h-screen p-4 sm:p-8 ${themeLight}`}>
             <SaveResultToast result={saveResultToast} onClose={() => setSaveResultToast(null)} />
-            <div className="max-w-xl mx-auto">
-                <header className="flex justify-between items-center mb-6 border-b pb-4">
-                    <h1 className={`text-3xl font-extrabold ${themeText} flex items-center`}><Barcode className="w-8 h-8 mr-2" />條碼比價神器 (Cloud)</h1>
-                    <div className="flex items-center space-x-3">
-                        <button onClick={() => setCurrentPage('allRecords')} className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`} title="查看所有記錄"><Database className="w-5 h-5" /></button>
-                        <button onClick={() => setIsThemeModalOpen(true)} className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`} title="設定介面主題"><PaintBucket className="w-5 h-5" /></button>
-                        <p className="text-sm text-gray-500 hidden sm:block">User: {userId.slice(0, 8)}...</p>
-                    </div>
-                </header>
-
-                {statusMessage && <div className="bg-blue-500 text-white p-3 rounded-lg shadow-md mb-4 text-center font-medium">{statusMessage}</div>}
-
-                {ocrResult && (
-                    <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-4 mb-6">
-                        <h3 className="text-lg font-semibold text-yellow-800 mb-2">AI 辨識結果 (開發者確認區)</h3>
-                        <div className="grid grid-cols-2 gap-2 text-sm">
-                            <div>條碼:</div><div>{ocrResult.scannedBarcode || 'N/A'}</div>
-                            <div>品名:</div><div>{ocrResult.productName || 'N/A'}</div>
-                            {/* 顯示原價和特價信息 */}
-                            {ocrResult.specialPrice ? (
-                                <>
-                                    {ocrResult.originalPrice && (
-                                        <>
-                                            <div>原價:</div><div className="line-through text-red-500">${ocrResult.originalPrice.toFixed(2)}</div>
-                                        </>
-                                    )}
-                                    <div>特價:</div><div className="text-green-600 font-bold">${ocrResult.specialPrice.toFixed(2)}</div>
-                                </>
-                            ) : (
-                                <>
-                                    <div>價格:</div><div>${ocrResult.extractedPrice || 'N/A'}</div>
-                                </>
-                            )}
-                            <div>數量:</div><div>{ocrResult.quantity || 'N/A'}</div>
-                            <div>商店:</div><div>{ocrResult.storeName || 'N/A'}</div>
-                            <div>折扣:</div><div>{ocrResult.discountDetails || '無'}</div>
+            
+            {/* 根據 currentPage 狀態渲染不同頁面 */}
+            {currentPage === 'main' && (
+                <div className="max-w-xl mx-auto">
+                    <header className="flex justify-between items-center mb-6 border-b pb-4">
+                        <h1 className={`text-3xl font-extrabold ${themeText} flex items-center`}><Barcode className="w-8 h-8 mr-2" />條碼比價神器 (Cloud)</h1>
+                        <div className="flex items-center space-x-3">
+                            {/* 新增待確認的辨識按鈕 */}
+                            <button 
+                                onClick={() => setCurrentPage('ocrQueue')}
+                                className={`relative p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`}
+                                title={`待確認的辨識 (${pendingOcrCards.length})`}
+                            >
+                                <Zap className="w-5 h-5" />
+                                {pendingOcrCards.length > 0 && (
+                                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                                        {pendingOcrCards.length}
+                                    </span>
+                                )}
+                            </button>
+                            <button onClick={() => setCurrentPage('allRecords')} className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`} title="查看所有記錄"><Database className="w-5 h-5" /></button>
+                            <button onClick={() => setIsThemeModalOpen(true)} className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`} title="設定介面主題"><PaintBucket className="w-5 h-5" /></button>
+                            <p className="text-sm text-gray-500 hidden sm:block">User: {userId.slice(0, 8)}...</p>
                         </div>
-                        <button onClick={() => setOcrResult(null)} className="mt-3 px-3 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 text-sm">關閉</button>
-                    </div>
-                )}
+                    </header>
 
-                <div className={`p-6 rounded-xl shadow-2xl bg-white border-t-4 ${themeBorder}`}>
-                    <h2 className={`text-xl font-semibold ${themeText} mb-6 flex items-center`}><Zap className="w-5 h-5 mr-2" />步驟 1: AI 視覺自動擷取</h2>
-                    <button className={`w-full p-4 rounded-lg text-white font-bold text-lg shadow-xl transition-all ${themePrimary} hover:opacity-80 flex items-center justify-center`} onClick={handleNewScanClick}>
-                        <Camera className="inline-block w-6 h-6 mr-3" />開啟鏡頭擷取
-                    </button>
-                    <hr className="my-6 border-gray-200" />
-                    <h2 className={`text-xl font-semibold text-gray-700 mb-4 flex items-center`}><FileText className="w-5 h-5 mr-2" />步驟 2: 檢查或手動輸入</h2>
-                    
-                    {/* 新增的擷取畫面顯示區塊 */}
-                    {capturedImage && (
-                        <div className="mb-6">
-                            <label className="block text-gray-700 font-medium mb-2">擷取畫面 (請確認辨識資料是否正確)</label>
-                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-2 bg-gray-50 relative overflow-hidden">
-                                <div className="relative w-full aspect-video">
-                                    {capturedImage.startsWith('data:image') ? (
-                                        <img src={capturedImage} alt="擷取畫面" className="w-full h-full object-cover" />
-                                    ) : (
-                                        <img src={capturedImage} alt="擷取畫面" className="w-full h-full object-cover" />
-                                    )}
-                                </div>
+                    {statusMessage && <div className="bg-blue-500 text-white p-3 rounded-lg shadow-md mb-4 text-center font-medium">{statusMessage}</div>}
+
+                    {ocrResult && (
+                        <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-4 mb-6">
+                            <h3 className="text-lg font-semibold text-yellow-800 mb-2">AI 辨識結果 (開發者確認區)</h3>
+                            <div className="grid grid-cols-2 gap-2 text-sm">
+                                <div>條碼:</div><div>{ocrResult.scannedBarcode || 'N/A'}</div>
+                                <div>品名:</div><div>{ocrResult.productName || 'N/A'}</div>
+                                {/* 顯示原價和特價信息 */}
+                                {ocrResult.specialPrice ? (
+                                    <>
+                                        {ocrResult.originalPrice && (
+                                            <>
+                                                <div>原價:</div><div className="line-through text-red-500">${ocrResult.originalPrice.toFixed(2)}</div>
+                                            </>
+                                        )}
+                                        <div>特價:</div><div className="text-green-600 font-bold">${ocrResult.specialPrice.toFixed(2)}</div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div>價格:</div><div>${ocrResult.extractedPrice || 'N/A'}</div>
+                                    </>
+                                )}
+                                <div>數量:</div><div>{ocrResult.quantity || 'N/A'}</div>
+                                <div>商店:</div><div>{ocrResult.storeName || 'N/A'}</div>
+                                <div>折扣:</div><div>{ocrResult.discountDetails || '無'}</div>
                             </div>
-                            <p className="text-sm text-gray-500 mt-2">此圖片將持續顯示直到進行下一次辨識或退出應用程式</p>
+                            <button onClick={() => setOcrResult(null)} className="mt-3 px-3 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 text-sm">關閉</button>
                         </div>
                     )}
-                    
-                    <div className="mb-4">
-                        <label className="block text-gray-700 font-medium mb-1">條碼數據</label>
-                        <input type="text" value={barcode} onChange={(e) => setBarcode(e.target.value)} placeholder="AI 自動填入，或手動輸入" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" />
-                    </div>
-                    <div className="mb-4">
-                        <label className="block text-gray-700 font-medium mb-1">產品名稱</label>
-                        <input type="text" value={productName} onChange={(e) => setProductName(e.target.value)} placeholder={productNamePlaceholder} className={`w-full p-3 border border-gray-300 rounded-lg ${lookupStatus === 'found' ? 'bg-green-50' : lookupStatus === 'new' ? 'bg-yellow-50' : ''}`} readOnly={lookupStatus === 'found' && !ocrResult} />
-                        <p className="text-sm text-gray-500 mt-1">ID (Hash): {barcode ? djb2Hash(barcode) : 'N/A'}</p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                        <div>
-                            <label className="block text-gray-700 font-medium mb-1">總價 ($) <span className="text-red-500">*</span></label>
-                            <input type="number" value={currentPrice} onChange={(e) => setCurrentPrice(e.target.value)} placeholder="AI 擷取" className="w-full p-3 border border-gray-300 rounded-lg" />
-                        </div>
-                        <div>
-                            <label className="block text-gray-700 font-medium mb-1">商店名稱</label>
-                            <input 
-                                type="text" 
-                                value={storeName} 
-                                onFocus={() => setIsStoreSelectorOpen(true)}
-                                readOnly
-                                placeholder="點擊選擇商店"
-                                className="w-full p-3 border border-gray-300 rounded-lg bg-gray-50 cursor-pointer"
-                            />
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4 mb-4">
-                        <div>
-                            <label className="block text-gray-700 font-medium mb-1">數量 <span className="text-red-500">*</span></label>
-                            <input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="例如: 500" className="w-full p-3 border border-gray-300 rounded-lg" />
-                        </div>
-                        <div>
-                            <label className="block text-gray-700 font-medium mb-1">單位 <span className="text-red-500">*</span></label>
-                            <select value={unitType} onChange={(e) => setUnitType(e.target.value)} className="w-full p-3 border border-gray-300 rounded-lg">
-                                <option value="ml">ml (毫升)</option>
-                                <option value="g">g (克)</option>
-                                <option value="pcs">pcs (個/包/支/條)</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-gray-700 font-medium mb-1">單價 (每100g/ml)</label>
-                            <input type="text" value={unitPrice ? unitPrice.toFixed(2) : '-'} readOnly className="w-full p-3 border border-gray-300 rounded-lg bg-gray-100" />
-                        </div>
-                    </div>
-                    <div className="mb-6">
-                        <label className="block text-gray-700 font-medium mb-1">優惠細節</label>
-                        <input type="text" value={discountDetails} onChange={(e) => setDiscountDetails(e.target.value)} placeholder="例如: 買二送一" className="w-full p-3 border border-gray-300 rounded-lg" />
-                    </div>
-                    <button className={`w-full mt-4 p-3 rounded-lg text-white font-semibold shadow-lg transition-all bg-emerald-500 hover:bg-emerald-600`} onClick={() => saveAndComparePrice()} disabled={isLoading}>
-                        <ClipboardCheck className="inline-block w-5 h-5 mr-2" />{isLoading ? '處理中...' : '步驟 3: 儲存紀錄並比價'}
-                    </button>
-                </div>
 
-                <div className="mt-8">
-                    <h2 className={`text-xl font-semibold ${themeText} mb-4 flex items-center`}>
-                        <DollarSign className="w-5 h-5 mr-2" />
-                        比價結果 {productName && <span className="ml-2 font-normal text-gray-500">- {productName}</span>}
-                    </h2>
-                    <div className={`p-6 rounded-xl shadow-xl border-2 ${comparisonResult.isBest ? 'border-green-500 bg-green-50' : 'border-yellow-500 bg-yellow-50'}`}>
-                        <p className={`text-lg font-bold ${comparisonResult.isBest ? 'text-green-700' : 'text-yellow-700'}`}>{comparisonResult.message}</p>
-                        {comparisonResult.bestPrice && <p className="text-sm text-gray-600 mt-2">歷史最低標價: ${comparisonResult.bestPrice}</p>}
-                        <p className="text-xs text-gray-500 mt-2">**附註:** 您的紀錄已安全儲存在雲端。</p>
+                    <div className={`p-6 rounded-xl shadow-2xl bg-white border-t-4 ${themeBorder}`}>
+                        <h2 className={`text-xl font-semibold ${themeText} mb-6 flex items-center`}><Zap className="w-5 h-5 mr-2" />步驟 1: AI 視覺自動擷取</h2>
+                        <button className={`w-full p-4 rounded-lg text-white font-bold text-lg shadow-xl transition-all ${themePrimary} hover:opacity-80 flex items-center justify-center`} onClick={handleNewScanClick}>
+                            <Camera className="inline-block w-6 h-6 mr-3" />開啟鏡頭擷取
+                        </button>
+                        <hr className="my-6 border-gray-200" />
+                        <h2 className={`text-xl font-semibold text-gray-700 mb-4 flex items-center`}><FileText className="w-5 h-5 mr-2" />步驟 2: 檢查或手動輸入</h2>
+                        
+                        {/* 新增的擷取畫面顯示區塊 */}
+                        {capturedImage && (
+                            <div className="mb-6">
+                                <label className="block text-gray-700 font-medium mb-2">擷取畫面 (請確認辨識資料是否正確)</label>
+                                <div className="border-2 border-dashed border-gray-300 rounded-lg p-2 bg-gray-50 relative overflow-hidden">
+                                    <div className="relative w-full aspect-video">
+                                        {capturedImage.startsWith('data:image') ? (
+                                            <img src={capturedImage} alt="擷取畫面" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <img src={capturedImage} alt="擷取畫面" className="w-full h-full object-cover" />
+                                        )}
+                                    </div>
+                                </div>
+                                <p className="text-sm text-gray-500 mt-2">此圖片將持續顯示直到進行下一次辨識或退出應用程式</p>
+                            </div>
+                        )}
+                        
+                        <div className="mb-4">
+                            <label className="block text-gray-700 font-medium mb-1">條碼數據</label>
+                            <input type="text" value={barcode} onChange={(e) => setBarcode(e.target.value)} placeholder="AI 自動填入，或手動輸入" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" />
+                        </div>
+                        <div className="mb-4">
+                            <label className="block text-gray-700 font-medium mb-1">產品名稱</label>
+                            <input type="text" value={productName} onChange={(e) => setProductName(e.target.value)} placeholder={productNamePlaceholder} className={`w-full p-3 border border-gray-300 rounded-lg ${lookupStatus === 'found' ? 'bg-green-50' : lookupStatus === 'new' ? 'bg-yellow-50' : ''}`} readOnly={lookupStatus === 'found' && !ocrResult} />
+                            <p className="text-sm text-gray-500 mt-1">ID (Hash): {barcode ? djb2Hash(barcode) : 'N/A'}</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label className="block text-gray-700 font-medium mb-1">總價 ($) <span className="text-red-500">*</span></label>
+                                <input type="number" value={currentPrice} onChange={(e) => setCurrentPrice(e.target.value)} placeholder="AI 擷取" className="w-full p-3 border border-gray-300 rounded-lg" />
+                            </div>
+                            <div>
+                                <label className="block text-gray-700 font-medium mb-1">商店名稱</label>
+                                <input 
+                                    type="text" 
+                                    value={storeName} 
+                                    onFocus={() => setIsStoreSelectorOpen(true)}
+                                    readOnly
+                                    placeholder="點擊選擇商店"
+                                    className="w-full p-3 border border-gray-300 rounded-lg bg-gray-50 cursor-pointer"
+                                />
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-4 mb-4">
+                            <div>
+                                <label className="block text-gray-700 font-medium mb-1">數量 <span className="text-red-500">*</span></label>
+                                <input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="例如: 500" className="w-full p-3 border border-gray-300 rounded-lg" />
+                            </div>
+                            <div>
+                                <label className="block text-gray-700 font-medium mb-1">單位 <span className="text-red-500">*</span></label>
+                                <select value={unitType} onChange={(e) => setUnitType(e.target.value)} className="w-full p-3 border border-gray-300 rounded-lg">
+                                    <option value="ml">ml (毫升)</option>
+                                    <option value="g">g (克)</option>
+                                    <option value="pcs">pcs (個/包/支/條)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-gray-700 font-medium mb-1">單價 (每100g/ml)</label>
+                                <input type="text" value={unitPrice ? unitPrice.toFixed(2) : '-'} readOnly className="w-full p-3 border border-gray-300 rounded-lg bg-gray-100" />
+                            </div>
+                        </div>
+                        <div className="mb-6">
+                            <label className="block text-gray-700 font-medium mb-1">優惠細節</label>
+                            <input type="text" value={discountDetails} onChange={(e) => setDiscountDetails(e.target.value)} placeholder="例如: 買二送一" className="w-full p-3 border border-gray-300 rounded-lg" />
+                        </div>
+                        <button className={`w-full mt-4 p-3 rounded-lg text-white font-semibold shadow-lg transition-all bg-emerald-500 hover:bg-emerald-600`} onClick={() => saveAndComparePrice()} disabled={isLoading}>
+                            <ClipboardCheck className="inline-block w-5 h-5 mr-2" />{isLoading ? '處理中...' : '步驟 3: 儲存紀錄並比價'}
+                        </button>
                     </div>
-                </div>
 
-                {(lookupStatus === 'found' || lookupStatus === 'new') && <PriceHistoryDisplay historyRecords={productHistory} theme={currentTheme} />}
-            </div>
+                    <div className="mt-8">
+                        <h2 className={`text-xl font-semibold ${themeText} mb-4 flex items-center`}>
+                            <DollarSign className="w-5 h-5 mr-2" />
+                            比價結果 {productName && <span className="ml-2 font-normal text-gray-500">- {productName}</span>}
+                        </h2>
+                        <div className={`p-6 rounded-xl shadow-xl border-2 ${comparisonResult.isBest ? 'border-green-500 bg-green-50' : 'border-yellow-500 bg-yellow-50'}`}>
+                            <p className={`text-lg font-bold ${comparisonResult.isBest ? 'text-green-700' : 'text-yellow-700'}`}>{comparisonResult.message}</p>
+                            {comparisonResult.bestPrice && <p className="text-sm text-gray-600 mt-2">歷史最低標價: ${comparisonResult.bestPrice}</p>}
+                            <p className="text-xs text-gray-500 mt-2">**附註:** 您的紀錄已安全儲存在雲端。</p>
+                        </div>
+                    </div>
+
+                    {(lookupStatus === 'found' || lookupStatus === 'new') && <PriceHistoryDisplay historyRecords={productHistory} theme={currentTheme} />}
+                </div>
+            )}
+            
+            {currentPage === 'allRecords' && (
+                <AllRecordsPage theme={currentTheme} onBack={() => setCurrentPage('main')} db={db} />
+            )}
+            
+            {currentPage === 'ocrQueue' && (
+                <OcrQueuePage 
+                    theme={currentTheme} 
+                    onBack={() => setCurrentPage('main')} 
+                    pendingOcrCards={pendingOcrCards}
+                    onRemoveCard={handleRemovePendingOcrCard}
+                />
+            )}
 
             {isThemeModalOpen && <ThemeSelector theme={currentTheme} saveTheme={saveUserTheme} onClose={() => setIsThemeModalOpen(false)} />}
-            {isCaptureModalOpen && <AIOcrCaptureModal theme={currentTheme} onAnalysisSuccess={handleAiCaptureSuccess} onClose={handleCaptureModalClose} stream={streamRef.current} />}
+            {isCaptureModalOpen && <AIOcrCaptureModal theme={currentTheme} onAnalysisSuccess={handleAiCaptureSuccess} onClose={handleCaptureModalClose} stream={streamRef.current} onQueueNextCapture={handleQueueNextCapture} />}
             {isStoreSelectorOpen && <StoreSelector theme={currentTheme} onSelect={handleStoreSelect} onClose={() => setIsStoreSelectorOpen(false)} />}
         </div>
     );

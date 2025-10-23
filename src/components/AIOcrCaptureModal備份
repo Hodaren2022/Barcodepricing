@@ -57,16 +57,15 @@ async function callGeminiApiWithRetry(payload, apiUrl, maxRetries = 3) {
     throw lastError;
 }
 
-function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream, onQueueNextCapture }) {
+function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
     const videoRef = useRef(null);
     const [scanError, setScanError] = useState('');
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [capturedImage, setCapturedImage] = useState(null);
-    const streamRef = useRef(stream); // 添加這一行來保持對 stream 的引用
 
-    // 更新 useEffect 以處理 stream 變化
     useEffect(() => {
-        streamRef.current = stream; // 更新 streamRef 的值
+        // This effect handles starting the video stream when the modal opens
+        // or when the user clicks "Retake".
         if (stream && videoRef.current && !capturedImage) {
             videoRef.current.srcObject = stream;
             videoRef.current.play().catch(err => {
@@ -74,7 +73,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream, onQueueN
                 setScanError("無法播放相機影像。");
             });
         }
-    }, [stream, capturedImage]);
+    }, [stream, capturedImage]); // Re-run when stream is available or image is cleared
 
     const handleCapture = useCallback(() => {
         if (!videoRef.current || !videoRef.current.srcObject) return;

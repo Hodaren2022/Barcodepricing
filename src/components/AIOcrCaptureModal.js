@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Camera, Zap } from 'lucide-react';
+import { X, Camera, Zap, RotateCcw } from 'lucide-react';
 
 const withExponentialBackoff = async (fn, retries = 5, delay = 1000) => {
     for (let i = 0; i < retries; i++) {
@@ -200,6 +200,107 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream, onQueueN
     }
 }, [capturedImage, onAnalysisSuccess, onClose]);
 
+    const handleAnalyzeAndCaptureNext = useCallback(async () => {
+        if (!capturedImage) { 
+            setScanError("沒有可分析的影像。"); 
+            return; 
+        }
+        setIsAnalyzing(true);
+        setScanError('');
+        try {
+            const base64Image = capturedImage.split(',')[1];
+        
+            const userQuery = "請根據圖片中的條碼、標價、產品名稱、規格（質量/容量/數量）、商店名稱和折扣資訊，以嚴格的 JSON 格式輸出結構化數據。請特別注意計算產品的總容量/總質量。如果圖像中顯示了原價和特價，請分別標註。";
+
+            const newSchema = {
+                type: "OBJECT",
+                properties: {
+                    scannedBarcode: { "type": "STRING", "description": "影像中找到的 EAN, UPC 或其他產品條碼數字，如果不可見則為空字串。" },
+                    productName: { "type": "STRING", "description": "產品名稱，例如：家庭號牛奶" },
+                    originalPrice: { "type": "NUMBER", "description": "產品的原價（純數字，例如 59），如果沒有原價則為空。" },
+                    specialPrice: { "type": "NUMBER", "description": "產品的特價（純數字，例如 39），如果沒有特價則為空。" },
+                    listedPrice: { "type": "NUMBER", "description": "產品標價（純數字，例如 59），如果沒有單一標價則為空。當有特價時，listedPrice 應為特價；當無特價時，listedPrice 應為原價。" },
+                    totalCapacity: { "type": "NUMBER", "description": "產品的總容量/總質量/總數量（純數字）。例如：若產品是 '18克10入'，則總容量是 180；若產品是 '2000ml'，則總容量是 2000。" },
+                    baseUnit: { "type": "STRING", "description": "用於計算單價的基礎單位。僅使用 'g' (克), 'ml' (毫升), 或 'pcs' (個/入)。如果是質量，請統一使用 'g'。" },
+                    storeName: { "type": "STRING", "description": "價目標籤或收據所示的商店名稱。如果不可見則為空字串。" },
+                    discountDetails: { "type": "STRING", "description": "發現的任何促銷或折扣的詳細描述（例如：'買一送一', '第二件半價', '有效期限 2026/01/01'）。如果沒有折扣則為空字串。" }
+                },
+                propertyOrdering: ["scannedBarcode", "productName", "originalPrice", "specialPrice", "listedPrice", "totalCapacity", "baseUnit", "storeName", "discountDetails"]
+            };
+            
+            const systemPrompt = `
+                你是一個專業的價格數據分析助理。你的任務是從圖像中識別產品條碼、產品名稱、標價、完整的容量/質量/數量資訊、商店名稱和折扣細節，並將其格式化為嚴格的 JSON 輸出。
+                **計算規則（重要）：**
+                1. 標價 (listedPrice) 必須是純數字。
+                2. 總容量 (totalCapacity) 必須是純數字。
+                3. 如果產品標示為「X 克 Y 入」，**必須**計算總質量： totalCapacity = X * Y。例如：「18克10入」-> 180。
+                4. 如果產品標示為「X 毫升 Y 瓶」，**必須**計算總容量： totalCapacity = X * Y。
+                5. 如果產品標示為「Z 個」，則 totalCapacity = Z。
+                6. 基礎單位 (baseUnit) 必須是 'g', 'ml', 或 'pcs' 之一。質量請用 'g'。
+                7. 如果圖像中同時顯示原價和特價：
+                   - originalPrice 應包含原價數值
+                   - specialPrice 應包含特價數值
+                   - listedPrice 應包含特價數值（因為這是消費者實際支付的價格）
+                8. 如果圖像中只顯示一個價格：
+                   - listedPrice 應包含該價格數值
+                   - originalPrice 和 specialPrice 應為空
+                請勿輸出任何 JSON 以外的文字、註釋或說明。
+            `;
+
+            const apiUrl = `/.netlify/functions/gemini-proxy`;
+            const payload = { systemPrompt, userPrompt: userQuery, base64Image, responseSchema: newSchema };
+            const analysisResult = await withExponentialBackoff(() => callGeminiApiWithRetry(payload, apiUrl));
+            console.log("AI Analysis Result:", analysisResult);
+
+            // 計算並添加單價欄位
+            const { 
+                scannedBarcode = '', 
+                productName = '', 
+                listedPrice = 0, 
+                totalCapacity = 0, 
+                baseUnit = 'pcs', 
+                storeName = 'AI 辨識', 
+                discountDetails = '',
+                specialPrice = null,
+                originalPrice = null
+            } = analysisResult;
+            let unitPrice = 0;
+            if (listedPrice > 0 && totalCapacity > 0) {
+                 if (baseUnit === 'g' || baseUnit === 'ml') {
+                    unitPrice = (listedPrice / totalCapacity) * 100;
+                } else if (baseUnit === 'pcs') {
+                    unitPrice = listedPrice / totalCapacity;
+                }
+            }
+            
+            // 準備傳遞給父組件的數據，包含計算出的單價和捕獲的圖像
+            const finalData = {
+                scannedBarcode: scannedBarcode,
+                productName: productName,
+                extractedPrice: listedPrice.toString(),
+                storeName: storeName,
+                discountDetails: discountDetails,
+                quantity: totalCapacity.toString(),
+                unitType: baseUnit,
+                unitPrice: unitPrice,
+                specialPrice: specialPrice,
+                originalPrice: originalPrice,
+                capturedImage: capturedImage
+            };
+
+            // 將該擷取畫面排進辨識序列中
+            onQueueNextCapture(finalData);
+            
+            // 開始下一輪畫面擷取與辨識動作
+            handleRetake();
+        } catch (error) {
+            console.error("AI 分析失敗:", error);
+            setScanError(`AI 分析錯誤: ${error.message}`);
+        } finally {
+            setIsAnalyzing(false);
+        }
+    }, [capturedImage, onQueueNextCapture, handleRetake]);
+
     const handleSimulatedAnalysis = () => {
         const randomListedPrice = parseFloat((Math.random() * 50 + 100).toFixed(2));
         const randomTotalCapacity = Math.floor(Math.random() * 1000) + 100; // 100-1099
@@ -281,9 +382,14 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream, onQueueN
                     {!capturedImage && !scanError && <button onClick={handleCapture} className={`w-full p-3 mb-3 rounded-lg text-white font-semibold shadow-lg transition-all ${themePrimary} ${themeHover} flex items-center justify-center`} disabled={isAnalyzing}><Camera className="inline-block w-5 h-5 mr-2" />擷取畫面</button>}
                     {capturedImage && !scanError && (
                         <div className="grid grid-cols-2 gap-4 mb-3">
-                            <button onClick={handleRetake} className="w-full p-3 rounded-lg bg-gray-500 hover:bg-gray-600 text-white font-semibold shadow-lg transition-all flex items-center justify-center" disabled={isAnalyzing}>重新拍攝</button>
+                            <button onClick={handleRetake} className="w-full p-3 rounded-lg bg-gray-500 hover:bg-gray-600 text-white font-semibold shadow-lg transition-all flex items-center justify-center" disabled={isAnalyzing}><RotateCcw className="w-5 h-5 mr-2" />重新拍攝</button>
                             <button onClick={handleAnalyze} className={`w-full p-3 rounded-lg text-white font-semibold shadow-lg transition-all ${themePrimary} ${themeHover} flex items-center justify-center`} disabled={isAnalyzing}><Zap className="w-5 h-5 mr-2" />開始 AI 分析</button>
                         </div>
+                    )}
+                    {capturedImage && !scanError && (
+                        <button onClick={handleAnalyzeAndCaptureNext} className={`w-full p-3 mb-3 rounded-lg text-white font-semibold shadow-lg transition-all bg-green-600 hover:bg-green-700 flex items-center justify-center`} disabled={isAnalyzing}>
+                            <Zap className="w-5 h-5 mr-2" /><Camera className="w-5 h-5 mr-2" />進行分析並拍攝下一張
+                        </button>
                     )}
                     <button onClick={handleSimulatedAnalysis} className="w-full p-3 mb-3 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg shadow-lg transition-all" disabled={isAnalyzing}>模擬 AI 分析成功 (測試用)</button>
                     <button onClick={onClose} className="w-full p-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg shadow-lg transition-all" disabled={isAnalyzing}>關閉</button>

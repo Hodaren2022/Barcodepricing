@@ -624,6 +624,7 @@ function App() {
     const themeText = currentTheme.text;
     const themeLight = currentTheme.light;
     const themeBorder = currentTheme.border;
+    const themeHover = currentTheme.hover; // 添加這一行來定義 themeHover
 
     const productNamePlaceholder = useMemo(() => {
         switch(lookupStatus) {
@@ -652,48 +653,11 @@ function App() {
                     <header className="flex justify-between items-center mb-6 border-b pb-4">
                         <h1 className={`text-3xl font-extrabold ${themeText} flex items-center`}><Barcode className="w-8 h-8 mr-2" />條碼比價神器 (Cloud)</h1>
                         <div className="flex items-center space-x-3">
-                            {/* 新增待確認的辨識按鈕 */}
+                            {/* 新增待辨識的按鈕 */}
                             <button 
-                                onClick={() => {
-                                    // 如果有待確認的卡片，處理第一個
-                                    if (pendingOcrCards.length > 0) {
-                                        // 重新添加 handleProcessPendingOcrCard 函數並調用它
-                                        const processPendingOcrCard = (card) => {
-                                            // 設置表單數據
-                                            setOcrResult(card);
-                                            setCapturedImage(card.capturedImage);
-                                            setBarcode(card.scannedBarcode || '');
-                                            setProductName(card.productName || '');
-                                            setCurrentPrice(card.extractedPrice || '');
-                                            setStoreName(card.storeName || '');
-                                            setDiscountDetails(card.discountDetails || '');
-                                            setQuantity(card.quantity || '');
-                                            setUnitType(card.unitType || 'pcs');
-                                            
-                                            // 計算單價
-                                            const priceValue = parseFloat(card.extractedPrice);
-                                            const qty = parseFloat(card.quantity);
-                                            if (!isNaN(priceValue) && !isNaN(qty) && qty > 0) {
-                                                const calculatedUnitPrice = calculateUnitPrice(priceValue, qty, card.unitType);
-                                                setUnitPrice(calculatedUnitPrice);
-                                            }
-                                            
-                                            // 更新狀態
-                                            if (card.productName && card.scannedBarcode) {
-                                                setLookupStatus('found');
-                                            } else {
-                                                setLookupStatus('new');
-                                            }
-                                            
-                                            // 從待確認序列中移除該卡片
-                                            setPendingOcrCards(prev => prev.filter(item => item.id !== card.id));
-                                        };
-                                        
-                                        processPendingOcrCard(pendingOcrCards[0]);
-                                    }
-                                }}
+                                onClick={() => setCurrentPage('ocrQueue')}
                                 className={`relative p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`}
-                                title={`待確認的辨識 (${pendingOcrCards.length})`}
+                                title={`待辨識 (${pendingOcrCards.length})`}
                             >
                                 <Zap className="w-5 h-5" />
                                 {pendingOcrCards.length > 0 && (
@@ -830,6 +794,59 @@ function App() {
                     </div>
 
                     {(lookupStatus === 'found' || lookupStatus === 'new') && <PriceHistoryDisplay historyRecords={productHistory} theme={currentTheme} />}
+                    
+                    {/* 在主介面添加一個快捷處理待辨識卡片的按鈕 */}
+                    {pendingOcrCards.length > 0 && (
+                        <div className="mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <h3 className="font-bold text-yellow-800">有待辨識的項目</h3>
+                                    <p className="text-sm text-yellow-600">您有 {pendingOcrCards.length} 個待辨識的項目等待處理</p>
+                                </div>
+                                <button 
+                                    onClick={() => {
+                                        // 處理第一個待辨識的卡片
+                                        const firstCard = pendingOcrCards[0];
+                                        
+                                        // 設置表單數據
+                                        setOcrResult(firstCard);
+                                        setCapturedImage(firstCard.capturedImage);
+                                        setBarcode(firstCard.scannedBarcode || '');
+                                        setProductName(firstCard.productName || '');
+                                        setCurrentPrice(firstCard.extractedPrice || '');
+                                        setStoreName(firstCard.storeName || '');
+                                        setDiscountDetails(firstCard.discountDetails || '');
+                                        setQuantity(firstCard.quantity || '');
+                                        setUnitType(firstCard.unitType || 'pcs');
+                                        
+                                        // 計算單價
+                                        const priceValue = parseFloat(firstCard.extractedPrice);
+                                        const qty = parseFloat(firstCard.quantity);
+                                        if (!isNaN(priceValue) && !isNaN(qty) && qty > 0) {
+                                            const calculatedUnitPrice = calculateUnitPrice(priceValue, qty, firstCard.unitType);
+                                            setUnitPrice(calculatedUnitPrice);
+                                        }
+                                        
+                                        // 更新狀態
+                                        if (firstCard.productName && firstCard.scannedBarcode) {
+                                            setLookupStatus('found');
+                                        } else {
+                                            setLookupStatus('new');
+                                        }
+                                        
+                                        // 從待辨識序列中移除該卡片
+                                        setPendingOcrCards(prev => prev.filter(item => item.id !== firstCard.id));
+                                        
+                                        // 顯示提示訊息
+                                        setStatusMessage(`已載入待辨識項目: ${firstCard.productName || '未命名產品'}`);
+                                    }}
+                                    className={`px-4 py-2 rounded-lg text-white font-medium ${themePrimary} ${themeHover}`}
+                                >
+                                    處理第一個待辨識項目
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
             

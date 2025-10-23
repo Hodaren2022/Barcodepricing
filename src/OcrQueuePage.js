@@ -395,7 +395,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
             console.error("比價檢查失敗:", error);
             return null;
         }
-    }, [calculateFinalPrice, calculateUnitPrice, db]);
+    }, []);
 
     // 當待辨識卡片列表改變時，重新計算比價結果
     useEffect(() => {

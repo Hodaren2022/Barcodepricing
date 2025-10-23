@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, Trash2, Clock, AlertCircle, CheckCircle } from 'lucide-react';
 import { db } from './firebase-config.js';
 import { doc, setDoc, addDoc, collection, serverTimestamp, getDoc, query, where, getDocs } from "firebase/firestore";
@@ -341,7 +341,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     }
 
     // 新增函數：檢查價格是否為歷史最低
-    const checkIfBestPrice = async (card) => {
+    const checkIfBestPrice = useCallback(async (card) => {
         try {
             // 生成產品 ID
             const numericalID = generateProductId(card.scannedBarcode, card.productName, card.storeName);
@@ -395,7 +395,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
             console.error("比價檢查失敗:", error);
             return null;
         }
-    };
+    }, [calculateFinalPrice, calculateUnitPrice, db]);
 
     // 當待辨識卡片列表改變時，重新計算比價結果
     useEffect(() => {

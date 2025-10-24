@@ -559,7 +559,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                         </div>
                                     )}
                                     
-                                    <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
+                                    <div className="grid grid-cols-2 gap-1 mt-1 text-sm">
                                         {/* 條碼欄位 */}
                                         <div className="col-span-2">
                                             <label className="block text-gray-700 font-medium mb-0.5">條碼數據</label>
@@ -567,7 +567,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                                 type="text"
                                                 value={card.scannedBarcode || ''}
                                                 onChange={(e) => handleCardChange(card.id, 'scannedBarcode', e.target.value)}
-                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
                                                 placeholder="條碼"
                                             />
                                         </div>
@@ -579,7 +579,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                                 type="text"
                                                 value={card.productName || ''}
                                                 onChange={(e) => handleCardChange(card.id, 'productName', e.target.value)}
-                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
                                                 placeholder="產品名稱"
                                             />
                                         </div>
@@ -592,7 +592,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                                 value={card.storeName || ''}
                                                 onChange={(e) => handleCardChange(card.id, 'storeName', e.target.value)}
                                                 onClick={() => handleStoreClick(card)}
-                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-gray-50 cursor-pointer"
+                                                className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 bg-gray-50 cursor-pointer"
                                                 placeholder="點擊選擇商店"
                                             />
                                         </div>
@@ -606,7 +606,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                                         type="number"
                                                         value={card.originalPrice || ''}
                                                         onChange={(e) => handleCardChange(card.id, 'originalPrice', e.target.value)}
-                                                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                        className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
                                                         placeholder="原價"
                                                     />
                                                 </div>
@@ -616,7 +616,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                                         type="number"
                                                         value={card.specialPrice || ''}
                                                         onChange={(e) => handleCardChange(card.id, 'specialPrice', e.target.value)}
-                                                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-green-600 font-bold"
+                                                        className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 text-green-600 font-bold"
                                                         placeholder="特價"
                                                     />
                                                 </div>
@@ -628,7 +628,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                                     type="number"
                                                     value={card.extractedPrice || ''}
                                                     onChange={(e) => handleCardChange(card.id, 'extractedPrice', e.target.value)}
-                                                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                    className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
                                                     placeholder="價格"
                                                 />
                                             </div>
@@ -641,7 +641,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                                 type="text"
                                                 value={card.quantity || ''}
                                                 onChange={(e) => handleCardChange(card.id, 'quantity', e.target.value)}
-                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
                                                 placeholder="數量"
                                             />
                                         </div>
@@ -650,7 +650,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                             <select
                                                 value={card.unitType || 'pcs'}
                                                 onChange={(e) => handleCardChange(card.id, 'unitType', e.target.value)}
-                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
                                             >
                                                 <option value="ml">ml (毫升)</option>
                                                 <option value="g">g (克)</option>
@@ -665,7 +665,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                                 type="text"
                                                 value={formatUnitPrice(card.unitPrice)}
                                                 readOnly
-                                                className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100"
+                                                className="w-full px-2 py-1 border border-gray-300 rounded bg-gray-100"
                                             />
                                         </div>
                                         
@@ -676,7 +676,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                                 type="text"
                                                 value={card.discountDetails || ''}
                                                 onChange={(e) => handleCardChange(card.id, 'discountDetails', e.target.value)}
-                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
                                                 placeholder="優惠資訊"
                                             />
                                         </div>

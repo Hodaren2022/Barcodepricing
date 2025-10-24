@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffe
 import { ArrowLeft, Database, TrendingUp, Edit, Trash2, Save, X, CheckCircle, Search } from 'lucide-react';
 import { collection, getDocs, query, orderBy, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { calculateUnitPrice, formatUnitPrice } from './utils/priceCalculations';
+import StoreSelector from './StoreSelector';
 
 // 圖表組件
 const CHART_WIDTH = 400;
@@ -599,11 +600,58 @@ function AllRecordsPage({ theme, onBack, db }) {
         if (!db) return;
         try {
             const recordRef = doc(db, "priceRecords", updatedRecord.id);
+            // 更新所有字段，不僅僅是價格和折扣詳情
             await updateDoc(recordRef, {
                 price: updatedRecord.price,
-                discountDetails: updatedRecord.discountDetails
+                discountDetails: updatedRecord.discountDetails,
+                productName: updatedRecord.productName,
+                storeName: updatedRecord.storeName,
+                quantity: updatedRecord.quantity,
+                unitType: updatedRecord.unitType,
+                unitPrice: updatedRecord.unitPrice,
+                originalPrice: updatedRecord.originalPrice,
+                specialPrice: updatedRecord.specialPrice
             });
-            await fetchData(); // 重新獲取數據以更新UI
+            
+            // 在編輯模式下，更新本地狀態而不是重新獲取所有數據
+            if (isEditMode) {
+                setLocalRecords(prev => {
+                    const newRecords = {...prev};
+                    
+                    // 確保更新的記錄所屬的產品在 localRecords 中存在
+                    if (!newRecords[updatedRecord.numericalID]) {
+                        newRecords[updatedRecord.numericalID] = [];
+                    }
+                    
+                    // 更新記錄
+                    Object.keys(newRecords).forEach(productId => {
+                        if (newRecords[productId]) {
+                            newRecords[productId] = newRecords[productId].map(record => 
+                                record.id === updatedRecord.id ? updatedRecord : record
+                            ).filter(record => record !== undefined); // 過濾掉可能的 undefined 值
+                        }
+                    });
+                    
+                    // 確保當前更新的記錄存在於其對應的產品記錄中
+                    if (!newRecords[updatedRecord.numericalID].some(record => record.id === updatedRecord.id)) {
+                        newRecords[updatedRecord.numericalID].push(updatedRecord);
+                    }
+                    
+                    return newRecords;
+                });
+                
+                // 同時更新本地產品列表中的產品名稱
+                setLocalProducts(prev => 
+                    prev.map(product => 
+                        product.numericalID === updatedRecord.numericalID 
+                            ? {...product, productName: updatedRecord.productName} 
+                            : product
+                    )
+                );
+            } else {
+                await fetchData(); // 非編輯模式下重新獲取數據以更新UI
+            }
+            
             showSuccessMessage('記錄已成功更新');
         } catch (error) {
             console.error("更新記錄失敗:", error);
@@ -795,7 +843,8 @@ function AllRecordsPage({ theme, onBack, db }) {
                         {filteredProducts.map(product => {
                             // 修復：確保 records 始終有默認值
                             const records = isEditMode ? (localRecords[product.numericalID] || []) : (allRecords[product.numericalID] || []);
-                            if (records.length === 0) return null;
+                            // 修改：即使沒有記錄也顯示產品卡片，但只在編輯模式下
+                            if (records.length === 0 && !isEditMode) return null;
                             return (
                                 // 修改：為選中的項目添加增強的視覺反饋
                                 <div key={product.numericalID} className={`relative transition-all duration-200 ${isEditMode && selectedItems.has(product.numericalID) ? 'bg-blue-50 border-2 border-blue-500 rounded-lg' : ''}`}>
@@ -934,6 +983,9 @@ function EditModal({ record, onClose, onSave }) {
     const [discount, setDiscount] = useState(record.discountDetails || '');
     const [originalPrice, setOriginalPrice] = useState(record.originalPrice || '');
     const [specialPrice, setSpecialPrice] = useState(record.specialPrice || '');
+    const [productName, setProductName] = useState(record.productName || '');
+    const [storeName, setStoreName] = useState(record.storeName || '');
+    const [isStoreSelectorOpen, setIsStoreSelectorOpen] = useState(false);
 
     const handleSave = () => {
         const newUnitPrice = calculateUnitPrice(price, quantity, unitType);
@@ -949,17 +1001,51 @@ function EditModal({ record, onClose, onSave }) {
             unitPrice: newUnitPrice,
             discountDetails: discount,
             originalPrice: originalPrice ? parseFloat(originalPrice) : null,
-            specialPrice: specialPrice ? parseFloat(specialPrice) : null
+            specialPrice: specialPrice ? parseFloat(specialPrice) : null,
+            productName: productName,
+            storeName: storeName
         });
     };
 
     const currentUnitPrice = calculateUnitPrice(price, quantity, unitType);
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-hidden">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
                 <h2 className="text-xl font-bold mb-4">編輯記錄</h2>
-                <div className="space-y-4">
+                <div className="space-y-3">
+                    {/* 產品名稱輸入 */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">產品名稱</label>
+                        <input
+                            type="text"
+                            value={productName}
+                            onChange={(e) => setProductName(e.target.value)}
+                            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                    </div>
+                    
+                    {/* 商店名稱輸入 */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">商店名稱</label>
+                        <div className="mt-1 flex">
+                            <input
+                                type="text"
+                                value={storeName}
+                                onChange={(e) => setStoreName(e.target.value)}
+                                className="block flex-grow border border-gray-300 rounded-l-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                                placeholder="點擊選擇商店或手動輸入"
+                                readOnly
+                            />
+                            <button 
+                                onClick={() => setIsStoreSelectorOpen(true)}
+                                className="bg-indigo-600 text-white px-4 py-2 rounded-r-md hover:bg-indigo-700"
+                            >
+                                選擇
+                            </button>
+                        </div>
+                    </div>
+                    
                     {/* 原價輸入 */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700">原價 ($)</label>
@@ -1033,17 +1119,28 @@ function EditModal({ record, onClose, onSave }) {
                         />
                     </div>
                 </div>
-                <div className="mt-6 flex justify-end space-x-3">
-                    <button onClick={onClose} className="flex items-center bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300">
+                <div className="mt-4 flex justify-between">
+                    <button onClick={onClose} className="flex-1 mr-2 items-center bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300 flex justify-center">
                         <X size={18} className="mr-1" />
                         取消
                     </button>
-                    <button onClick={handleSave} className="flex items-center bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700">
+                    <button onClick={handleSave} className="flex-1 ml-2 items-center bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 flex justify-center">
                         <Save size={18} className="mr-1" />
                         保存
                     </button>
                 </div>
             </div>
+            
+            {isStoreSelectorOpen && (
+                <StoreSelector 
+                    onSelect={(selectedStore) => {
+                        setStoreName(selectedStore);
+                        setIsStoreSelectorOpen(false);
+                    }}
+                    onClose={() => setIsStoreSelectorOpen(false)}
+                    theme={{ primary: 'bg-indigo-600', hover: 'hover:bg-indigo-700', text: 'text-indigo-600' }}
+                />
+            )}
         </div>
     );
 }

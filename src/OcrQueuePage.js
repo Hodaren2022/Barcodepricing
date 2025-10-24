@@ -517,10 +517,10 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                     {pendingOcrCards.map((card) => (
                         <div 
                             key={card.id} 
-                            className={`bg-white p-4 rounded-lg shadow ${
+                            className={`bg-white p-4 rounded-lg shadow border-4 ${
                                 priceComparisonResults[card.id]?.isBest 
-                                    ? 'border-6 border-green-500' 
-                                    : 'border-6 border-yellow-500'
+                                    ? 'border-green-500' 
+                                    : 'border-yellow-500'
                             }`}
                         >
                             <div className="flex justify-between items-start">

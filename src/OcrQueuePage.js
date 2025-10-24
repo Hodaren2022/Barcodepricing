@@ -557,64 +557,76 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                         </div>
                                     )}
                                     
-                                    <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
+                                    <div className="grid grid-cols-2 gap-4 mt-2 text-sm">
                                         {/* 條碼欄位 */}
-                                        <div>
-                                            <span className="text-gray-500">條碼:</span>
+                                        <div className="col-span-2">
+                                            <label className="block text-gray-700 font-medium mb-1">條碼數據</label>
                                             <input
                                                 type="text"
                                                 value={card.scannedBarcode || ''}
                                                 onChange={(e) => handleCardChange(card.id, 'scannedBarcode', e.target.value)}
-                                                className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none w-24"
+                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                                 placeholder="條碼"
                                             />
                                         </div>
                                         
+                                        {/* 產品名稱欄位 */}
+                                        <div className="col-span-2">
+                                            <label className="block text-gray-700 font-medium mb-1">產品名稱</label>
+                                            <input
+                                                type="text"
+                                                value={card.productName || ''}
+                                                onChange={(e) => handleCardChange(card.id, 'productName', e.target.value)}
+                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                placeholder="產品名稱"
+                                            />
+                                        </div>
+                                        
                                         {/* 商店欄位 */}
-                                        <div>
-                                            <span className="text-gray-500">商店:</span>
+                                        <div className="col-span-2">
+                                            <label className="block text-gray-700 font-medium mb-1">商店名稱</label>
                                             <input
                                                 type="text"
                                                 value={card.storeName || ''}
                                                 onChange={(e) => handleCardChange(card.id, 'storeName', e.target.value)}
                                                 onClick={() => handleStoreClick(card)}
-                                                className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none w-24"
-                                                placeholder="選擇商店"
+                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-gray-50 cursor-pointer"
+                                                placeholder="點擊選擇商店"
                                             />
                                         </div>
                                         
-                                        {/* 原價和特價信息 */}
+                                        {/* 價格欄位 */}
                                         {card.specialPrice !== undefined ? (
                                             <>
                                                 <div>
-                                                    <span className="text-gray-500">原價:</span>
+                                                    <label className="block text-gray-700 font-medium mb-1">原價 ($)</label>
                                                     <input
                                                         type="number"
                                                         value={card.originalPrice || ''}
                                                         onChange={(e) => handleCardChange(card.id, 'originalPrice', e.target.value)}
-                                                        className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none w-20"
+                                                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                                         placeholder="原價"
                                                     />
                                                 </div>
                                                 <div>
-                                                    <span className="text-gray-500">特價:</span>
+                                                    <label className="block text-gray-700 font-medium mb-1">特價 ($)</label>
                                                     <input
                                                         type="number"
                                                         value={card.specialPrice || ''}
                                                         onChange={(e) => handleCardChange(card.id, 'specialPrice', e.target.value)}
-                                                        className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none w-20 text-green-600 font-bold"
+                                                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-green-600 font-bold"
                                                         placeholder="特價"
                                                     />
                                                 </div>
                                             </>
                                         ) : (
-                                            <div>
-                                                <span className="text-gray-500">價格:</span>
+                                            <div className="col-span-2">
+                                                <label className="block text-gray-700 font-medium mb-1">總價 ($)</label>
                                                 <input
                                                     type="number"
                                                     value={card.extractedPrice || ''}
                                                     onChange={(e) => handleCardChange(card.id, 'extractedPrice', e.target.value)}
-                                                    className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none w-20"
+                                                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                                     placeholder="價格"
                                                 />
                                             </div>
@@ -622,39 +634,47 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                         
                                         {/* 數量和單位 */}
                                         <div>
-                                            <span className="text-gray-500">數量:</span>
+                                            <label className="block text-gray-700 font-medium mb-1">數量</label>
                                             <input
                                                 type="text"
                                                 value={card.quantity || ''}
                                                 onChange={(e) => handleCardChange(card.id, 'quantity', e.target.value)}
-                                                className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none w-16"
+                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                                 placeholder="數量"
                                             />
+                                        </div>
+                                        <div>
+                                            <label className="block text-gray-700 font-medium mb-1">單位</label>
                                             <select
                                                 value={card.unitType || 'pcs'}
                                                 onChange={(e) => handleCardChange(card.id, 'unitType', e.target.value)}
-                                                className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none"
+                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                             >
-                                                <option value="ml">ml</option>
-                                                <option value="g">g</option>
-                                                <option value="pcs">pcs</option>
+                                                <option value="ml">ml (毫升)</option>
+                                                <option value="g">g (克)</option>
+                                                <option value="pcs">pcs (個/包/支/條)</option>
                                             </select>
                                         </div>
                                         
                                         {/* 單價 */}
-                                        <div>
-                                            <span className="text-gray-500">單價:</span>
-                                            <span className="ml-1">@{formatUnitPrice(card.unitPrice)}</span>
+                                        <div className="col-span-2">
+                                            <label className="block text-gray-700 font-medium mb-1">單價 (每100g/ml)</label>
+                                            <input
+                                                type="text"
+                                                value={formatUnitPrice(card.unitPrice)}
+                                                readOnly
+                                                className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100"
+                                            />
                                         </div>
                                         
                                         {/* 優惠資訊 */}
                                         <div className="col-span-2">
-                                            <span className="text-gray-500">優惠:</span>
+                                            <label className="block text-gray-700 font-medium mb-1">優惠細節</label>
                                             <input
                                                 type="text"
                                                 value={card.discountDetails || ''}
                                                 onChange={(e) => handleCardChange(card.id, 'discountDetails', e.target.value)}
-                                                className="ml-1 p-1 border-b border-gray-300 focus:border-blue-500 focus:outline-none w-full"
+                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                                 placeholder="優惠資訊"
                                             />
                                         </div>

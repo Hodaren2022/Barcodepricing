@@ -557,10 +557,10 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                         </div>
                                     )}
                                     
-                                    <div className="grid grid-cols-2 gap-4 mt-2 text-sm">
+                                    <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
                                         {/* 條碼欄位 */}
                                         <div className="col-span-2">
-                                            <label className="block text-gray-700 font-medium mb-1">條碼數據</label>
+                                            <label className="block text-gray-700 font-medium mb-0.5">條碼數據</label>
                                             <input
                                                 type="text"
                                                 value={card.scannedBarcode || ''}
@@ -572,7 +572,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                         
                                         {/* 產品名稱欄位 */}
                                         <div className="col-span-2">
-                                            <label className="block text-gray-700 font-medium mb-1">產品名稱</label>
+                                            <label className="block text-gray-700 font-medium mb-0.5">產品名稱</label>
                                             <input
                                                 type="text"
                                                 value={card.productName || ''}
@@ -584,7 +584,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                         
                                         {/* 商店欄位 */}
                                         <div className="col-span-2">
-                                            <label className="block text-gray-700 font-medium mb-1">商店名稱</label>
+                                            <label className="block text-gray-700 font-medium mb-0.5">商店名稱</label>
                                             <input
                                                 type="text"
                                                 value={card.storeName || ''}
@@ -599,7 +599,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                         {card.specialPrice !== undefined ? (
                                             <>
                                                 <div>
-                                                    <label className="block text-gray-700 font-medium mb-1">原價 ($)</label>
+                                                    <label className="block text-gray-700 font-medium mb-0.5">原價 ($)</label>
                                                     <input
                                                         type="number"
                                                         value={card.originalPrice || ''}
@@ -609,7 +609,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                                     />
                                                 </div>
                                                 <div>
-                                                    <label className="block text-gray-700 font-medium mb-1">特價 ($)</label>
+                                                    <label className="block text-gray-700 font-medium mb-0.5">特價 ($)</label>
                                                     <input
                                                         type="number"
                                                         value={card.specialPrice || ''}
@@ -621,7 +621,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                             </>
                                         ) : (
                                             <div className="col-span-2">
-                                                <label className="block text-gray-700 font-medium mb-1">總價 ($)</label>
+                                                <label className="block text-gray-700 font-medium mb-0.5">總價 ($)</label>
                                                 <input
                                                     type="number"
                                                     value={card.extractedPrice || ''}
@@ -634,7 +634,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                         
                                         {/* 數量和單位 */}
                                         <div>
-                                            <label className="block text-gray-700 font-medium mb-1">數量</label>
+                                            <label className="block text-gray-700 font-medium mb-0.5">數量</label>
                                             <input
                                                 type="text"
                                                 value={card.quantity || ''}
@@ -644,7 +644,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                             />
                                         </div>
                                         <div>
-                                            <label className="block text-gray-700 font-medium mb-1">單位</label>
+                                            <label className="block text-gray-700 font-medium mb-0.5">單位</label>
                                             <select
                                                 value={card.unitType || 'pcs'}
                                                 onChange={(e) => handleCardChange(card.id, 'unitType', e.target.value)}
@@ -658,7 +658,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                         
                                         {/* 單價 */}
                                         <div className="col-span-2">
-                                            <label className="block text-gray-700 font-medium mb-1">單價 (每100g/ml)</label>
+                                            <label className="block text-gray-700 font-medium mb-0.5">單價 (每100g/ml)</label>
                                             <input
                                                 type="text"
                                                 value={formatUnitPrice(card.unitPrice)}
@@ -669,7 +669,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                         
                                         {/* 優惠資訊 */}
                                         <div className="col-span-2">
-                                            <label className="block text-gray-700 font-medium mb-1">優惠細節</label>
+                                            <label className="block text-gray-700 font-medium mb-0.5">優惠細節</label>
                                             <input
                                                 type="text"
                                                 value={card.discountDetails || ''}

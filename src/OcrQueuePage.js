@@ -71,6 +71,9 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     // 新增狀態：正在編輯的卡片
     const [editingCard, setEditingCard] = useState(null);
     
+    // 新增狀態：待儲存的卡片
+    const [cardToSave, setCardToSave] = useState(null);
+    
     // 新增狀態：商店選擇器顯示狀態
     const [showStoreSelector, setShowStoreSelector] = useState(false);
     
@@ -168,35 +171,6 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                 alert("儲存失敗，請稍後再試");
             }
         }
-    };
-
-    // 確認儲存
-    const confirmSave = async () => {
-        if (saveConfirmation) {
-            try {
-                // 儲存到 Firebase
-                await saveOcrCardToFirebase(saveConfirmation);
-                
-                // 從待辨識序列中移除
-                onRemoveCard(saveConfirmation.id);
-                
-                // 儲存後更新 localStorage 使用量
-                setTimeout(() => {
-                    setLocalStorageUsage(getLocalStorageUsage());
-                }, 100);
-                
-                // 關閉對話框
-                setSaveConfirmation(null);
-            } catch (error) {
-                console.error("儲存失敗:", error);
-                alert("儲存失敗，請稍後再試");
-            }
-        }
-    };
-
-    // 取消儲存
-    const cancelSave = () => {
-        setSaveConfirmation(null);
     };
 
     // 處理卡片欄位變更

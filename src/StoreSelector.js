@@ -138,7 +138,7 @@ function StoreSelector({ theme, onSelect, onClose, isOcrQueueStoreSelector = fal
 
     return (
         <div className="fixed inset-0 bg-gray-900 bg-opacity-75 z-50 flex items-center justify-center p-4 sm:p-6">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col max-h-[80vh] h-auto">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-[calc(100%-80px)] sm:max-w-md flex flex-col max-h-[80vh] h-auto">
                 <div className="p-6 pb-4 flex-shrink-0">
                     <div className="flex justify-between items-center mb-4 border-b pb-2">
                         <h3 className={`text-xl font-bold ${theme.text}`}>

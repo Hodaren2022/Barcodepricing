@@ -51,79 +51,6 @@ function DeleteConfirmation({ card, onClose, onConfirm }) {
     );
 }
 
-// 儲存確認對話框組件
-function SaveConfirmation({ card, onClose, onConfirm }) {
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
-                <h2 className="text-xl font-bold mb-4">確認儲存</h2>
-                <p className="mb-4">您確定要儲存此待辨識項目嗎？</p>
-                <div className="mb-4 p-3 bg-gray-50 rounded">
-                    <h3 className="font-bold text-gray-800">{card.productName || '未命名產品'}</h3>
-                    <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
-                        <div>
-                            <span className="text-gray-500">條碼:</span>
-                            <span className="ml-1">{card.scannedBarcode || 'N/A'}</span>
-                        </div>
-                        <div>
-                            <span className="text-gray-500">商店:</span>
-                            <span className="ml-1">{card.storeName || 'N/A'}</span>
-                        </div>
-                        {card.specialPrice ? (
-                            <>
-                                {card.originalPrice && (
-                                    <div>
-                                        <span className="text-gray-500">原價:</span>
-                                        <span className="ml-1 line-through text-red-500">${parseFloat(card.originalPrice).toFixed(2)}</span>
-                                    </div>
-                                )}
-                                <div>
-                                    <span className="text-gray-500">特價:</span>
-                                    <span className="ml-1 text-green-600 font-bold">${parseFloat(card.specialPrice).toFixed(2)}</span>
-                                </div>
-                            </>
-                        ) : (
-                            <div>
-                                <span className="text-gray-500">價格:</span>
-                                <span className="ml-1">${card.extractedPrice || '0'}</span>
-                            </div>
-                        )}
-                        {/* 顯示數量和單位資訊 */}
-                        <div>
-                            <span className="text-gray-500">數量:</span>
-                            <span className="ml-1">{card.quantity || 'N/A'} {card.unitType || ''}</span>
-                        </div>
-                        <div>
-                            <span className="text-gray-500">單價:</span>
-                            <span className="ml-1">@{formatUnitPrice(card.unitPrice)}</span>
-                        </div>
-                        {card.discountDetails && (
-                            <div className="col-span-2">
-                                <span className="text-gray-500">優惠:</span>
-                                <span className="ml-1 text-indigo-600 italic">{card.discountDetails}</span>
-                            </div>
-                        )}
-                    </div>
-                </div>
-                <div className="flex justify-end space-x-3">
-                    <button 
-                        onClick={onClose}
-                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
-                    >
-                        取消
-                    </button>
-                    <button 
-                        onClick={onConfirm}
-                        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
-                    >
-                        確認儲存
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
 function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSelect }) {
     const [queueStats, setQueueStats] = useState({
         total: 0,
@@ -141,9 +68,6 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     // 新增狀態：刪除確認對話框
     const [deleteConfirmation, setDeleteConfirmation] = useState(null);
     
-    // 新增狀態：儲存確認對話框
-    const [saveConfirmation, setSaveConfirmation] = useState(null);
-    
     // 新增狀態：正在編輯的卡片
     const [editingCard, setEditingCard] = useState(null);
     
@@ -152,9 +76,6 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     
     // 新增狀態：比價結果
     const [priceComparisonResults, setPriceComparisonResults] = useState({});
-    
-    // 新增狀態：待儲存的卡片
-    const [cardToSave, setCardToSave] = useState(null);
 
     useEffect(() => {
         if (pendingOcrCards.length > 0) {
@@ -220,15 +141,32 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     };
 
     // 處理儲存操作 - 檢查商店名稱
-    const handleSaveClick = (card) => {
+    const handleSaveClick = async (card) => {
         // 檢查商店名稱是否為空白
         if (!card.storeName || card.storeName.trim() === '') {
             // 如果商店名稱為空白，顯示商店選擇器
             setCardToSave(card);
             setShowStoreSelector(true);
         } else {
-            // 如果商店名稱不為空白，直接儲存
-            setSaveConfirmation(card);
+            // 如果商店名稱不為空白，直接儲存（不再彈出確認對話框）
+            try {
+                // 儲存到 Firebase
+                await saveOcrCardToFirebase(card);
+                
+                // 從待辨識序列中移除
+                onRemoveCard(card.id);
+                
+                // 儲存後更新 localStorage 使用量
+                setTimeout(() => {
+                    setLocalStorageUsage(getLocalStorageUsage());
+                }, 100);
+                
+                // 顯示儲存成功提示
+                alert('儲存成功！');
+            } catch (error) {
+                console.error("儲存失敗:", error);
+                alert("儲存失敗，請稍後再試");
+            }
         }
     };
 
@@ -279,19 +217,38 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     const handleCloseStoreSelector = () => {
         setShowStoreSelector(false);
         setEditingCard(null);
-        setCardToSave(null);
     };
 
     // 處理商店選擇（自動套用選擇並關閉選擇器）
-    const handleStoreSelectForQueue = (selectedStore) => {
+    const handleStoreSelectForQueue = async (selectedStore) => {
         if (editingCard) {
             // 這是手動編輯卡片時的商店選擇
             handleCardChange(editingCard.id, 'storeName', selectedStore);
             handleCloseStoreSelector();
-        } else if (cardToSave) {
+        } else {
             // 這是儲存時的商店選擇
             const updatedCard = { ...cardToSave, storeName: selectedStore };
-            setSaveConfirmation(updatedCard);
+            
+            // 直接儲存（不再彈出確認對話框）
+            try {
+                // 儲存到 Firebase
+                await saveOcrCardToFirebase(updatedCard);
+                
+                // 從待辨識序列中移除
+                onRemoveCard(updatedCard.id);
+                
+                // 儲存後更新 localStorage 使用量
+                setTimeout(() => {
+                    setLocalStorageUsage(getLocalStorageUsage());
+                }, 100);
+                
+                // 顯示儲存成功提示
+                alert('儲存成功！');
+            } catch (error) {
+                console.error("儲存失敗:", error);
+                alert("儲存失敗，請稍後再試");
+            }
+            
             setShowStoreSelector(false);
             setCardToSave(null);
         }
@@ -548,12 +505,25 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                     {pendingOcrCards.map((card) => (
                         <div 
                             key={card.id} 
-                            className={`bg-white p-4 rounded-lg shadow border-l-4 border-blue-500 ${
-                                priceComparisonResults[card.id]?.backgroundColor || ''
+                            className={`bg-white p-4 rounded-lg shadow border-l-4 ${
+                                priceComparisonResults[card.id]?.isBest 
+                                    ? 'border-green-500' 
+                                    : 'border-yellow-500'
                             }`}
                         >
                             <div className="flex justify-between items-start">
                                 <div className="flex-1">
+                                    {/* 將比價結果移到卡片頂部 */}
+                                    {priceComparisonResults[card.id] && (
+                                        <div className={`mb-3 p-2 rounded text-center text-sm font-medium ${
+                                            priceComparisonResults[card.id].isBest 
+                                                ? 'text-green-800' 
+                                                : 'text-yellow-800'
+                                        }`}>
+                                            {priceComparisonResults[card.id].message}
+                                        </div>
+                                    )}
+                                    
                                     <input
                                         type="text"
                                         value={card.productName || ''}
@@ -700,17 +670,6 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                         </div>
                                     </div>
                                     
-                                    {/* 新增比價結果顯示 */}
-                                    {priceComparisonResults[card.id] && (
-                                        <div className={`mt-2 p-2 rounded text-center text-sm font-medium ${
-                                            priceComparisonResults[card.id].isBest 
-                                                ? 'text-green-800 bg-green-200' 
-                                                : 'text-yellow-800 bg-yellow-200'
-                                        }`}>
-                                            {priceComparisonResults[card.id].message}
-                                        </div>
-                                    )}
-                                    
                                     <div className="mt-2 text-xs text-gray-500">
                                         <p>加入時間: {formatTime(card.id)}</p>
                                         <p>運行時間: {calculateDuration(card.id)}</p>
@@ -738,21 +697,12 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                 </div>
             </div>
             
-            {/* 刪除確認對話框 */}
+            {/* 刪除確認對話框 - 保留 */}
             {deleteConfirmation && (
                 <DeleteConfirmation 
                     card={deleteConfirmation}
                     onClose={cancelDelete}
                     onConfirm={confirmDelete}
-                />
-            )}
-            
-            {/* 儲存確認對話框 */}
-            {saveConfirmation && (
-                <SaveConfirmation 
-                    card={saveConfirmation}
-                    onClose={cancelSave}
-                    onConfirm={confirmSave}
                 />
             )}
             

@@ -225,6 +225,10 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
                         <p className="text-2xl font-bold text-indigo-600">{formatUnitPrice(latestRecord.unitPrice) === '--' ? (isNaN(latestRecord.price) ? 'N/A' : `$${(latestRecord.price || 0).toFixed(2)}`) : `$${(latestRecord.price || 0).toFixed(2)} @${formatUnitPrice(latestRecord.unitPrice)}`}</p>
                     )}
                     <p className="text-xs text-gray-500">{latestRecord.timestamp.toLocaleDateString()}</p>
+                    {/* 顯示數量和單位 */}
+                    {latestRecord.quantity && latestRecord.unitType && (
+                        <p className="text-xs text-gray-500">數量: {latestRecord.quantity} {latestRecord.unitType}</p>
+                    )}
                 </div>
             </div>
 
@@ -260,6 +264,10 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
                                         <p className="font-medium">{`$${(record.price || 0).toFixed(2)} @${formatUnitPrice(record.unitPrice)}`}</p>
                                     )}
                                     {record.discountDetails && <p className="text-xs text-indigo-600">{record.discountDetails}</p>}
+                                    {/* 顯示數量和單位 */}
+                                    {record.quantity && record.unitType && (
+                                        <p className="text-xs text-gray-600">數量: {record.quantity} {record.unitType}</p>
+                                    )}
                                 </div>
                                 <div className="text-right">
                                     <p className="text-xs text-gray-500">{record.storeName || '未標註'}</p>

@@ -88,6 +88,7 @@ function SaveConfirmation({ card, onClose, onConfirm }) {
                                 <span className="ml-1">${card.extractedPrice || '0'}</span>
                             </div>
                         )}
+                        {/* 顯示數量和單位資訊 */}
                         <div>
                             <span className="text-gray-500">數量:</span>
                             <span className="ml-1">{card.quantity || 'N/A'} {card.unitType || ''}</span>
@@ -151,6 +152,9 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     
     // 新增狀態：比價結果
     const [priceComparisonResults, setPriceComparisonResults] = useState({});
+    
+    // 新增狀態：待儲存的卡片
+    const [cardToSave, setCardToSave] = useState(null);
 
     useEffect(() => {
         if (pendingOcrCards.length > 0) {
@@ -215,9 +219,17 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
         setDeleteConfirmation(null);
     };
 
-    // 處理儲存操作
+    // 處理儲存操作 - 檢查商店名稱
     const handleSaveClick = (card) => {
-        setSaveConfirmation(card);
+        // 檢查商店名稱是否為空白
+        if (!card.storeName || card.storeName.trim() === '') {
+            // 如果商店名稱為空白，顯示商店選擇器
+            setCardToSave(card);
+            setShowStoreSelector(true);
+        } else {
+            // 如果商店名稱不為空白，直接儲存
+            setSaveConfirmation(card);
+        }
     };
 
     // 確認儲存
@@ -267,14 +279,22 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     const handleCloseStoreSelector = () => {
         setShowStoreSelector(false);
         setEditingCard(null);
+        setCardToSave(null);
     };
 
     // 處理商店選擇（自動套用選擇並關閉選擇器）
     const handleStoreSelectForQueue = (selectedStore) => {
         if (editingCard) {
+            // 這是手動編輯卡片時的商店選擇
             handleCardChange(editingCard.id, 'storeName', selectedStore);
+            handleCloseStoreSelector();
+        } else if (cardToSave) {
+            // 這是儲存時的商店選擇
+            const updatedCard = { ...cardToSave, storeName: selectedStore };
+            setSaveConfirmation(updatedCard);
+            setShowStoreSelector(false);
+            setCardToSave(null);
         }
-        handleCloseStoreSelector(); // 自動關閉選擇器
     };
 
     // 儲存 OCR 卡片到 Firebase
@@ -742,6 +762,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                     theme={theme} 
                     onSelect={handleStoreSelectForQueue} 
                     onClose={handleCloseStoreSelector} 
+                    isOcrQueueStoreSelector={true}
                 />
             )}
         </div>

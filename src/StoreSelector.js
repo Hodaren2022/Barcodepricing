@@ -18,7 +18,7 @@ const initialStores = [
     { name: "其他", sort: 999 }
 ];
 
-function StoreSelector({ theme, onSelect, onClose }) {
+function StoreSelector({ theme, onSelect, onClose, isOcrQueueStoreSelector = false }) {
     const [selectedStore, setSelectedStore] = useState('');
     const [otherStore, setOtherStore] = useState('');
     const [commonStores, setCommonStores] = useState([]);
@@ -103,6 +103,36 @@ function StoreSelector({ theme, onSelect, onClose }) {
         onSelect(finalStoreName);
     };
 
+    // 處理商店選擇（用於待辨識序列管理頁面）
+    const handleStoreSelectForOcrQueue = async (storeName) => {
+        setSelectedStore(storeName);
+        
+        // 如果選擇的是"其他"，需要輸入商店名稱
+        if (storeName === '其他') {
+            // 不在這裡處理，讓用戶在輸入框中輸入
+            return;
+        }
+        
+        // 直接選擇商店並關閉選擇器
+        let finalStoreName = storeName;
+        
+        // 檢查是否需要添加新商店到資料庫
+        const storesCollection = collection(db, 'stores');
+        const q = query(storesCollection, where("name", "==", finalStoreName));
+        const querySnapshot = await getDocs(q);
+
+        if (querySnapshot.empty) {
+            await addDoc(storesCollection, {
+                name: finalStoreName,
+                sort: 1000, 
+                createdAt: serverTimestamp()
+            });
+        }
+        
+        onSelect(finalStoreName);
+        onClose();
+    };
+
     const themePrimary = theme.primary;
     const themeHover = theme.hover;
 
@@ -134,7 +164,7 @@ function StoreSelector({ theme, onSelect, onClose }) {
                             {commonStores.map((store) => (
                                 <button
                                     key={store.id}
-                                    onClick={() => setSelectedStore(store.name)}
+                                    onClick={() => isOcrQueueStoreSelector ? handleStoreSelectForOcrQueue(store.name) : setSelectedStore(store.name)}
                                     className={`p-3 rounded-lg text-center font-medium transition-all ${
                                         selectedStore === store.name 
                                             ? `${themePrimary} text-white shadow-md` 
@@ -163,25 +193,41 @@ function StoreSelector({ theme, onSelect, onClose }) {
                         </div>
                     )}
 
-                    <div className="flex justify-end space-x-3 pt-4 border-t">
+                    {/* 對於待辨識序列管理頁面，當選擇"其他"並輸入商店名稱後直接儲存 */}
+                    {isOcrQueueStoreSelector && selectedStore === '其他' && otherStore.trim() !== '' && (
                         <button
-                            onClick={onClose}
-                            className="px-4 py-2 bg-gray-500 text-white font-semibold rounded-lg shadow-lg hover:bg-gray-600 transition-all"
+                            onClick={() => {
+                                onSelect(otherStore.trim());
+                                onClose();
+                            }}
+                            className={`w-full p-3 mb-3 text-white font-semibold rounded-lg shadow-lg transition-all ${themePrimary} ${themeHover}`}
                         >
-                            取消
+                            確認選擇商店: {otherStore.trim()}
                         </button>
-                        <button
-                            onClick={handleSelect}
-                            disabled={loading || !selectedStore || (selectedStore === '其他' && otherStore.trim() === '')}
-                            className={`px-4 py-2 text-white font-semibold rounded-lg shadow-lg transition-all ${
-                                loading || !selectedStore || (selectedStore === '其他' && otherStore.trim() === '')
-                                    ? 'bg-gray-400 cursor-not-allowed'
-                                    : `${themePrimary} ${themeHover}`
-                            }`}
-                        >
-                            確認選擇
-                        </button>
-                    </div>
+                    )}
+
+                    {/* 只有在非待辨識序列管理頁面時才顯示取消和確認按鈕 */}
+                    {!isOcrQueueStoreSelector && (
+                        <div className="flex justify-end space-x-3 pt-4 border-t">
+                            <button
+                                onClick={onClose}
+                                className="px-4 py-2 bg-gray-500 text-white font-semibold rounded-lg shadow-lg hover:bg-gray-600 transition-all"
+                            >
+                                取消
+                            </button>
+                            <button
+                                onClick={handleSelect}
+                                disabled={loading || !selectedStore || (selectedStore === '其他' && otherStore.trim() === '')}
+                                className={`px-4 py-2 text-white font-semibold rounded-lg shadow-lg transition-all ${
+                                    loading || !selectedStore || (selectedStore === '其他' && otherStore.trim() === '')
+                                        ? 'bg-gray-400 cursor-not-allowed'
+                                        : `${themePrimary} ${themeHover}`
+                                }`}
+                            >
+                                確認選擇
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

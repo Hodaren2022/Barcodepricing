@@ -136,6 +136,7 @@ function PriceHistoryDisplay({ historyRecords, theme }) {
                             <span className="text-xs text-gray-500">{record.timestamp.toLocaleString()}</span>
                         </div>
                         <p className="text-sm text-gray-700 mt-1">商店: {record.storeName || '未標註'}</p>
+                        {/* 顯示數量和單位資訊 */}
                         {record.quantity && record.unitType && <p className="text-xs text-gray-600">數量: {record.quantity} {record.unitType} (總價: ${(record.price || 0).toFixed(2)})</p>}
                         {record.discountDetails && <p className="text-xs text-indigo-600 italic">優惠: {record.discountDetails}</p>}
                         {index === 0 && <span className={`text-xs font-semibold px-2 py-0.5 rounded-full text-white ${theme.primary}`}>最新紀錄</span>}

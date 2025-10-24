@@ -676,7 +676,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                         <p>運行時間: {calculateDuration(card.id)}</p>
                                     </div>
                                 </div>
-                                <div className="flex flex-col space-y-2">
+                                <div className="flex flex-col">
                                     <button 
                                         onClick={() => handleSaveClick(card)}
                                         className="p-2 text-green-500 hover:text-green-700 hover:bg-green-50 rounded-full"
@@ -686,7 +686,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                     </button>
                                     <button 
                                         onClick={() => handleDeleteClick(card)}
-                                        className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-full"
+                                        className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-full mt-5"
                                         title="刪除"
                                     >
                                         <Trash2 size={20} />

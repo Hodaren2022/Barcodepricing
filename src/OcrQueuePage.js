@@ -180,6 +180,23 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
             card.id === cardId ? { ...card, [field]: value } : card
         );
         onStoreSelect(updatedCards);
+        
+        // 當價格相關欄位變更時，重新計算比價結果
+        if (field === 'extractedPrice' || field === 'specialPrice' || field === 'originalPrice' || field === 'quantity' || field === 'unitType') {
+            // 延遲一點時間再重新計算，確保狀態已更新
+            setTimeout(() => {
+                const fetchPriceComparisonResults = async () => {
+                    const results = {};
+                    for (const card of updatedCards) {
+                        const result = await checkIfBestPrice(card, updatedCards);
+                        results[card.id] = result;
+                    }
+                    setPriceComparisonResults(results);
+                };
+                
+                fetchPriceComparisonResults();
+            }, 0);
+        }
     };
 
     // 處理商店欄位點擊
@@ -292,8 +309,8 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
         }
     }
 
-    // 新增函數：檢查價格是否為歷史最低
-    const checkIfBestPrice = useCallback(async (card) => {
+    // 新增函數：檢查價格是否為歷史最低（包含待辨識序列中的卡片）
+    const checkIfBestPrice = useCallback(async (card, allCards) => {
         try {
             // 生成產品 ID
             const numericalID = generateProductId(card.scannedBarcode, card.productName, card.storeName);
@@ -318,11 +335,31 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
             const recordsSnap = await getDocs(recordsQuery);
             const records = recordsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             
-            // 準備所有記錄以進行比較（包括當前記錄）
-            const allRecordsForCompare = [...records, { 
+            // 準備所有記錄以進行比較（包括當前記錄和待辨識序列中的相同產品）
+            let allRecordsForCompare = [...records, { 
                 unitPrice: calculatedUnitPrice,
                 timestamp: new Date()
             }];
+            
+            // 添加待辨識序列中相同產品的卡片（排除當前卡片）
+            const sameProductCards = allCards.filter(c => 
+                c.id !== card.id && 
+                generateProductId(c.scannedBarcode, c.productName, c.storeName) === numericalID
+            );
+            
+            // 將相同產品的卡片添加到比較列表中
+            sameProductCards.forEach(c => {
+                const cardFinalPrice = calculateFinalPrice(c.extractedPrice, c.specialPrice);
+                const cardPriceValue = parseFloat(cardFinalPrice);
+                const cardUnitPrice = calculateUnitPrice(cardPriceValue, c.quantity, c.unitType);
+                
+                if (cardUnitPrice !== null) {
+                    allRecordsForCompare.push({
+                        unitPrice: cardUnitPrice,
+                        timestamp: new Date(c.id) // 使用卡片 ID 作為時間戳
+                    });
+                }
+            });
 
             // 如果沒有歷史記錄，則當前價格就是最低價
             if (allRecordsForCompare.length <= 1) {
@@ -354,7 +391,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
         const fetchPriceComparisonResults = async () => {
             const results = {};
             for (const card of pendingOcrCards) {
-                const result = await checkIfBestPrice(card);
+                const result = await checkIfBestPrice(card, pendingOcrCards);
                 results[card.id] = result;
             }
             setPriceComparisonResults(results);
@@ -480,20 +517,20 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                     {pendingOcrCards.map((card) => (
                         <div 
                             key={card.id} 
-                            className={`bg-white p-4 rounded-lg shadow border-l-4 ${
+                            className={`bg-white p-4 rounded-lg shadow ${
                                 priceComparisonResults[card.id]?.isBest 
-                                    ? 'border-green-500' 
-                                    : 'border-yellow-500'
+                                    ? 'border-6 border-green-500' 
+                                    : 'border-6 border-yellow-500'
                             }`}
                         >
                             <div className="flex justify-between items-start">
                                 <div className="flex-1">
                                     {/* 將比價結果移到卡片頂部 */}
                                     {priceComparisonResults[card.id] && (
-                                        <div className={`mb-3 p-2 rounded text-center text-sm font-medium ${
+                                        <div className={`mb-3 p-2 rounded text-center text-base font-bold ${
                                             priceComparisonResults[card.id].isBest 
-                                                ? 'text-green-800' 
-                                                : 'text-yellow-800'
+                                                ? 'bg-green-500 text-white' 
+                                                : 'bg-yellow-500 text-pink-800'
                                         }`}>
                                             {priceComparisonResults[card.id].message}
                                         </div>

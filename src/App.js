@@ -8,6 +8,7 @@ import { getAuth, signInAnonymously } from "firebase/auth";
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, orderBy, serverTimestamp } from "firebase/firestore";
 import { calculateUnitPrice, calculateFinalPrice, formatUnitPrice } from './utils/priceCalculations';
 import OcrQueuePage from './OcrQueuePage';
+import { showUserFriendlyError, handleFirestoreSaveError } from './utils/errorHandler'; // 導入錯誤處理工具
 
 // ----------------------------------------------------------------------------
 // 1. 核心設定與工具函數 (Core Setup & Utilities)
@@ -511,7 +512,7 @@ function App() {
         const calculatedUnitPrice = calculateUnitPrice(priceValue, quantity, unitType);
 
         if (!userId || !productName || isNaN(priceValue) || isNaN(parseFloat(quantity)) || parseFloat(quantity) <= 0 || calculatedUnitPrice === null) {
-            setSaveResultToast({ status: 'error', message: '請確保已輸入條碼、產品名稱、有效總價、數量和單位！', productName: productName || "未知產品" });
+            showUserFriendlyError("請確保已輸入條碼、產品名稱、有效總價、數量和單位！", "資料驗證");
             return;
         }
         if (!finalStoreName.trim()) {
@@ -609,13 +610,15 @@ function App() {
             }
 
             setComparisonResult({ isBest, bestPrice, bestStore, message: toastMessage });
+            // 儲存成功時顯示提示訊息
             setSaveResultToast({ status: toastStatus, message: toastMessage, productName: productName });
             
             lookupProduct(barcode, productName, finalStoreName);
 
         } catch (error) {
             console.error("儲存或比價失敗 (Firestore):", error);
-            setSaveResultToast({ status: 'error', message: `數據操作失敗: ${error.message}`, productName: productName || "未知產品" });
+            const userMessage = handleFirestoreSaveError(error, "儲存價格資訊");
+            showUserFriendlyError(userMessage);
         } finally {
             setIsLoading(false);
         }

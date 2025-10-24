@@ -3,6 +3,7 @@ import { ArrowLeft, Database, TrendingUp, Edit, Trash2, Save, X, CheckCircle, Se
 import { collection, getDocs, query, orderBy, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { calculateUnitPrice, formatUnitPrice } from './utils/priceCalculations';
 import StoreSelector from './StoreSelector';
+import { showUserFriendlyError, handleFirestoreSaveError } from './utils/errorHandler'; // 導入錯誤處理工具
 
 // 圖表組件
 const CHART_WIDTH = 400;
@@ -337,6 +338,8 @@ function AllRecordsPage({ theme, onBack, db }) {
 
         } catch (error) {
             console.error('讀取 Firestore 數據失敗:', error);
+            const userMessage = handleFirestoreSaveError(error, "讀取產品數據");
+            showUserFriendlyError(userMessage);
         } finally {
             setLoading(false);
         }
@@ -461,6 +464,8 @@ function AllRecordsPage({ theme, onBack, db }) {
             setIsBulkDeleteConfirmationOpen(false);
         } catch (error) {
             console.error("Error deleting selected items:", error);
+            const userMessage = handleFirestoreSaveError(error, "批量刪除產品");
+            showUserFriendlyError(userMessage);
         }
     };
 
@@ -499,6 +504,8 @@ function AllRecordsPage({ theme, onBack, db }) {
             }
         } catch (error) {
             console.error("檢查數據衝突時出錯:", error);
+            const userMessage = handleFirestoreSaveError(error, "檢查數據衝突");
+            showUserFriendlyError(userMessage);
             // 出錯時仍然退出編輯模式
             await exitEditMode();
         }
@@ -593,6 +600,8 @@ function AllRecordsPage({ theme, onBack, db }) {
 
         } catch (error) {
             console.error("Error syncing with Firebase:", error);
+            const userMessage = handleFirestoreSaveError(error, "同步編輯數據");
+            showUserFriendlyError(userMessage);
         }
     };
 
@@ -655,6 +664,8 @@ function AllRecordsPage({ theme, onBack, db }) {
             showSuccessMessage('記錄已成功更新');
         } catch (error) {
             console.error("更新記錄失敗:", error);
+            const userMessage = handleFirestoreSaveError(error, "更新價格記錄");
+            showUserFriendlyError(userMessage);
         }
         setEditingRecord(null);
     };
@@ -716,6 +727,8 @@ function AllRecordsPage({ theme, onBack, db }) {
                 showSuccessMessage('記錄已成功刪除');
             } catch (error) {
                 console.error("刪除記錄失敗:", error);
+                const userMessage = handleFirestoreSaveError(error, "刪除價格記錄");
+                showUserFriendlyError(userMessage);
             } finally {
                 setDeletingRecord(null);
             }
@@ -729,6 +742,8 @@ function AllRecordsPage({ theme, onBack, db }) {
                 showSuccessMessage('記錄已成功刪除');
             } catch (error) {
                 console.error("刪除記錄失敗:", error);
+                const userMessage = handleFirestoreSaveError(error, "刪除價格記錄");
+                showUserFriendlyError(userMessage);
             }
             setDeletingRecord(null);
         }

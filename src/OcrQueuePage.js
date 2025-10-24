@@ -4,6 +4,7 @@ import { db } from './firebase-config.js';
 import { doc, setDoc, addDoc, collection, serverTimestamp, getDoc, query, where, getDocs } from "firebase/firestore";
 import { calculateUnitPrice, calculateFinalPrice, formatUnitPrice } from './utils/priceCalculations';
 import StoreSelector from './StoreSelector'; // 確保導入 StoreSelector
+import { showUserFriendlyError, handleFirestoreSaveError } from './utils/errorHandler'; // 導入錯誤處理工具
 
 // 計算 localStorage 使用量的函數
 function getLocalStorageUsage() {
@@ -164,11 +165,11 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                     setLocalStorageUsage(getLocalStorageUsage());
                 }, 100);
                 
-                // 顯示儲存成功提示
-                alert('儲存成功！');
+                // 儲存成功時不顯示任何訊息
             } catch (error) {
                 console.error("儲存失敗:", error);
-                alert("儲存失敗，請稍後再試");
+                const userMessage = handleFirestoreSaveError(error, "儲存待辨識卡片");
+                showUserFriendlyError(userMessage);
             }
         }
     };
@@ -216,11 +217,11 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                     setLocalStorageUsage(getLocalStorageUsage());
                 }, 100);
                 
-                // 顯示儲存成功提示
-                alert('儲存成功！');
+                // 儲存成功時不顯示任何訊息
             } catch (error) {
                 console.error("儲存失敗:", error);
-                alert("儲存失敗，請稍後再試");
+                const userMessage = handleFirestoreSaveError(error, "儲存待辨識卡片");
+                showUserFriendlyError(userMessage);
             }
             
             setShowStoreSelector(false);

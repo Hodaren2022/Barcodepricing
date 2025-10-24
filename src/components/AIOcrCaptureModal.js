@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Camera, Zap, RotateCcw } from 'lucide-react';
+import { showUserFriendlyError } from '../utils/errorHandler'; // 導入錯誤處理工具
 
 const withExponentialBackoff = async (fn, retries = 5, delay = 1000) => {
     for (let i = 0; i < retries; i++) {
@@ -206,7 +207,9 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream, onQueueN
         onClose();
     } catch (error) {
         console.error("AI 分析失敗:", error);
-        setScanError(`AI 分析錯誤: ${error.message}`);
+        const userMessage = `AI 分析錯誤: ${error.message || '未知錯誤'}`;
+        setScanError(userMessage);
+        showUserFriendlyError(userMessage, "AI 分析");
     } finally {
         setIsAnalyzing(false);
     }
@@ -320,7 +323,9 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream, onQueueN
             })
             .catch(error => {
                 console.error("AI 分析失敗:", error);
-                setScanError(`AI 分析錯誤: ${error.message}`);
+                const userMessage = `AI 分析錯誤: ${error.message || '未知錯誤'}`;
+                setScanError(userMessage);
+                showUserFriendlyError(userMessage, "AI 分析");
                 
                 // 即使分析失敗，也將基本數據加入序列，讓用戶知道有錯誤
                 const errorData = {

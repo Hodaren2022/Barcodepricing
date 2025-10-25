@@ -348,11 +348,12 @@ function AllRecordsPage({ theme, onBack, db, userId, isAuthReady }) {
     useEffect(() => {
         // 只有在 Firebase 已準備好時才執行查詢
         if (!isAuthReady || !userId) {
-            setLoading(true);
+            // 如果 Firebase 尚未準備好，不應該顯示加載狀態
+            // 讓用戶知道需要等待 Firebase 初始化
             return;
         }
         
-        setLoading(true);
+        // Firebase 已準備好且有 userId，執行數據獲取
         fetchData();
     }, [fetchData, isAuthReady, userId]);
 
@@ -771,7 +772,15 @@ function AllRecordsPage({ theme, onBack, db, userId, isAuthReady }) {
                         <button onClick={onBack} className="flex items-center text-indigo-600 hover:text-indigo-800 mr-4"><ArrowLeft className="mr-1" size={20} />返回</button>
                         <h1 className="text-2xl font-bold text-gray-800">所有記錄</h1>
                     </div>
-                    <div className="text-center py-10"><p>正在從雲端加載數據...</p></div>
+                    <div className="text-center py-10">
+                        {!isAuthReady ? (
+                            <p>正在初始化雲端服務，請稍候...</p>
+                        ) : !userId ? (
+                            <p>正在獲取用戶信息，請稍候...</p>
+                        ) : (
+                            <p>正在從雲端加載數據...</p>
+                        )}
+                    </div>
                 </div>
             </div>
         );

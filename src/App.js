@@ -669,7 +669,7 @@ function App() {
     }
 
     if (currentPage === 'allRecords') {
-        return <AllRecordsPage theme={currentTheme} onBack={() => setCurrentPage('main')} db={db} />;
+        return <AllRecordsPage theme={currentTheme} onBack={() => setCurrentPage('main')} db={db} userId={userId} isAuthReady={isAuthReady} />;
     }
 
     return (
@@ -880,7 +880,7 @@ function App() {
             )}
             
             {currentPage === 'allRecords' && (
-                <AllRecordsPage theme={currentTheme} onBack={() => setCurrentPage('main')} db={db} />
+                <AllRecordsPage theme={currentTheme} onBack={() => setCurrentPage('main')} db={db} userId={userId} isAuthReady={isAuthReady} />
             )}
             
             {currentPage === 'ocrQueue' && (

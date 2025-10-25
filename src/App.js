@@ -321,6 +321,8 @@ function App() {
             setUnitPrice(null);
         }
     }, [currentPrice, quantity, unitType, ocrResult]);
+    
+    // 提前定義所有會被使用的函數，避免 no-use-before-define 警告
     const clearForm = useCallback(() => {
         setBarcode('');
         setProductName('');
@@ -345,17 +347,7 @@ function App() {
             console.log("stopCameraStream: Camera stream stopped.");
         }
     }, []);
-
-    useEffect(() => {
-        // Add a cleanup function to stop the camera when the component unmounts
-        return () => {
-            console.log("useEffect cleanup: Running camera cleanup.");
-            stopCameraStream();
-            // 清除捕獲的圖像
-            setCapturedImage(null);
-        };
-    }, [stopCameraStream, setCapturedImage]);
-
+    
     const startCameraStream = async () => {
         console.log("startCameraStream: Attempting to start camera.");
         if (streamRef.current) {
@@ -374,6 +366,11 @@ function App() {
     };
 
     const lookupProduct = useCallback(async (barcodeData, currentProductName, currentStoreName) => {
+        // 如果 Firebase 尚未初始化，則不執行查詢
+        if (!isAuthReady || !userId) {
+            return;
+        }
+        
         const numericalID = generateProductId(barcodeData, currentProductName, currentStoreName);
 
         // Adjust early exit condition:
@@ -430,77 +427,10 @@ function App() {
             setLookupStatus('ready');
             setProductHistory([]);
         }
-    }, [setProductName, setLookupStatus, setProductHistory, setStatusMessage]);
+    }, [isAuthReady, userId, setProductName, setLookupStatus, setProductHistory, setStatusMessage]);
 
-    useEffect(() => {
-        if (isAuthReady) { // Only run if auth is ready
-            const timer = setTimeout(() => {
-                // Pass current productName and storeName from state
-                lookupProduct(barcode, productName, storeName);
-            }, 500);
-            return () => clearTimeout(timer);
-        } else if (barcode.length === 0) {
-            clearForm();
-        }
-    }, [barcode, isAuthReady, lookupProduct, clearForm, productName, storeName]);
-
-    useEffect(() => {
-        if (statusMessage) {
-            const timer = setTimeout(() => { setStatusMessage(''); }, 3000);
-            return () => clearTimeout(timer);
-        }
-    }, [statusMessage]);
-
-    const handleAiCaptureSuccess = useCallback((result) => {
-        const { scannedBarcode, productName, extractedPrice, storeName, discountDetails, quantity, unitType, specialPrice, capturedImage: receivedImage } = result;
-        setOcrResult(result);
-        
-        // 設置捕獲的圖像
-        if (receivedImage) {
-            setCapturedImage(receivedImage);
-        }
-        
-        const newBarcode = scannedBarcode || '';
-        setBarcode(newBarcode);
-
-        if (!newBarcode) {
-            setStatusMessage("AI 未能識別條碼，請手動輸入或確保條碼清晰！");
-        } else {
-            setStatusMessage(`AI 分析成功！`);
-        }
-
-        setProductName(productName || '');
-        
-        // 優先使用特價，如果有的話
-        const finalPrice = specialPrice && !isNaN(parseFloat(specialPrice)) ? specialPrice : extractedPrice;
-        setCurrentPrice(finalPrice || '');
-        
-        setStoreName(storeName || '');
-        setDiscountDetails(discountDetails || '');
-
-        setQuantity(quantity || '');
-        setUnitType(unitType || 'pcs');
-
-        if (productName && newBarcode) {
-            setLookupStatus('found');
-        } else {
-            setLookupStatus('new');
-        }
-    }, [setBarcode, setProductName, setCurrentPrice, setStoreName, setDiscountDetails, setOcrResult, setStatusMessage, setLookupStatus, setQuantity, setUnitType, setCapturedImage]);
-
-    // 新增函數：將辨識結果加入待確認序列
-    const handleQueueNextCapture = useCallback((result) => {
-        // 將結果加入待確認的辨識卡片中
-        setPendingOcrCards(prev => [...prev, { ...result, id: Date.now() }]);
-        setStatusMessage(`已將辨識結果加入待確認序列！`);
-    }, []);
-
-    // 新增函數：移除待確認的辨識卡片
-    const handleRemovePendingOcrCard = useCallback((cardId) => {
-        setPendingOcrCards(prev => prev.filter(item => item.id !== cardId));
-    }, []);
-
-    const saveAndComparePrice = useCallback(async (selectedStore) => {
+    // 正確地提前定義 performSaveAndCompare 函數（必須在 saveAndComparePrice 之前定義）
+    const performSaveAndCompare = useCallback(async (selectedStore) => {
         const finalStoreName = selectedStore || storeName;
         const numericalID = generateProductId(barcode, productName, finalStoreName);
         
@@ -513,15 +443,15 @@ function App() {
 
         if (!userId || !productName || isNaN(priceValue) || isNaN(parseFloat(quantity)) || parseFloat(quantity) <= 0 || calculatedUnitPrice === null) {
             showUserFriendlyError("請確保已輸入條碼、產品名稱、有效總價、數量和單位！", "資料驗證");
+            setIsLoading(false);
             return;
         }
         if (!finalStoreName.trim()) {
             setIsStoreSelectorOpen(true);
+            setIsLoading(false);
             return;
         }
 
-        setIsLoading(true);
-        
         try {
             const productRef = doc(db, "products", numericalID.toString());
             const productSnap = await getDoc(productRef);
@@ -623,6 +553,79 @@ function App() {
             setIsLoading(false);
         }
     }, [userId, barcode, productName, currentPrice, discountDetails, storeName, lookupProduct, quantity, unitType, setSaveResultToast, setComparisonResult, setIsLoading, setIsStoreSelectorOpen, ocrResult]);
+
+    // 正確地提前定義 saveAndComparePrice 函數
+    const saveAndComparePrice = useCallback(async (selectedStore) => {
+        // 確保 Firebase 已初始化，如果尚未完成初始化則強制初始化
+        if (!isAuthReady) {
+            // 顯示加載訊息並等待初始化完成
+            setIsLoading(true);
+            // 等待 Firebase 初始化完成
+            const checkAuth = () => {
+                if (isAuthReady) {
+                    // 初始化完成後繼續執行
+                    performSaveAndCompare(selectedStore);
+                } else {
+                    // 繼續等待
+                    setTimeout(checkAuth, 100);
+                }
+            };
+            checkAuth();
+            return;
+        }
+        
+        // 如果 Firebase 已準備好，直接執行保存操作
+        performSaveAndCompare(selectedStore);
+    }, [isAuthReady, performSaveAndCompare]);
+    
+    const handleAiCaptureSuccess = useCallback((result) => {
+        const { scannedBarcode, productName, extractedPrice, storeName, discountDetails, quantity, unitType, specialPrice, capturedImage: receivedImage } = result;
+        setOcrResult(result);
+        
+        // 設置捕獲的圖像
+        if (receivedImage) {
+            setCapturedImage(receivedImage);
+        }
+        
+        const newBarcode = scannedBarcode || '';
+        setBarcode(newBarcode);
+
+        if (!newBarcode) {
+            setStatusMessage("AI 未能識別條碼，請手動輸入或確保條碼清晰！");
+        } else {
+            setStatusMessage(`AI 分析成功！`);
+        }
+
+        setProductName(productName || '');
+        
+        // 優先使用特價，如果有的話
+        const finalPrice = specialPrice && !isNaN(parseFloat(specialPrice)) ? specialPrice : extractedPrice;
+        setCurrentPrice(finalPrice || '');
+        
+        setStoreName(storeName || '');
+        setDiscountDetails(discountDetails || '');
+
+        setQuantity(quantity || '');
+        setUnitType(unitType || 'pcs');
+
+        if (productName && newBarcode) {
+            setLookupStatus('found');
+        } else {
+            setLookupStatus('new');
+        }
+    }, [setBarcode, setProductName, setCurrentPrice, setStoreName, setDiscountDetails, setOcrResult, setStatusMessage, setLookupStatus, setQuantity, setUnitType, setCapturedImage]);
+
+    // 新增函數：將辨識結果加入待確認序列
+    const handleQueueNextCapture = useCallback((result) => {
+        // 將結果加入待確認的辨識卡片中
+        setPendingOcrCards(prev => [...prev, { ...result, id: Date.now() }]);
+        setStatusMessage(`已將辨識結果加入待確認序列！`);
+    }, []);
+
+    // 新增函數：移除待確認的辨識卡片
+    const handleRemovePendingOcrCard = useCallback((cardId) => {
+        setPendingOcrCards(prev => prev.filter(item => item.id !== cardId));
+    }, []);
 
     const handleStoreSelect = useCallback((selectedStore) => {
         setStoreName(selectedStore);

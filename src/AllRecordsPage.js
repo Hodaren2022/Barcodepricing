@@ -285,7 +285,7 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
 }
 
 // 主組件
-function AllRecordsPage({ theme, onBack, db }) {
+function AllRecordsPage({ theme, onBack, db, userId, isAuthReady }) {
     const [allProducts, setAllProducts] = useState([]);
     const [allRecords, setAllRecords] = useState({});
     const [loading, setLoading] = useState(true);
@@ -346,8 +346,15 @@ function AllRecordsPage({ theme, onBack, db }) {
     }, [db]);
 
     useEffect(() => {
+        // 只有在 Firebase 已準備好時才執行查詢
+        if (!isAuthReady || !userId) {
+            setLoading(true);
+            return;
+        }
+        
+        setLoading(true);
         fetchData();
-    }, [fetchData]);
+    }, [fetchData, isAuthReady, userId]);
 
     useEffect(() => {
         if (isSearchOpen && searchInputRef.current) {

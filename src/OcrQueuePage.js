@@ -288,14 +288,10 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
             const records = recordsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             
             // 準備所有記錄以進行比較（包括當前記錄和待辨識序列中的相同產品）
-            let allRecordsForCompare = [...records, { 
-                unitPrice: calculatedUnitPrice,
-                timestamp: new Date()
-            }];
+            let allRecordsForCompare = [...records];
             
-            // 添加待辨識序列中相同產品的卡片（排除當前卡片）
+            // 添加待辨識序列中相同產品的卡片（包括當前卡片）
             const sameProductCards = allCards.filter(c => 
-                c.id !== card.id && 
                 generateProductId(c.scannedBarcode, c.productName, c.storeName) === numericalID
             );
             
@@ -305,27 +301,41 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                 const cardPriceValue = parseFloat(cardFinalPrice);
                 const cardUnitPrice = calculateUnitPrice(cardPriceValue, c.quantity, c.unitType);
                 
-                if (cardUnitPrice !== null) {
+                if (cardUnitPrice !== null && !isNaN(cardUnitPrice)) {
                     allRecordsForCompare.push({
                         unitPrice: cardUnitPrice,
-                        timestamp: new Date(c.id) // 使用卡片 ID 作為時間戳
+                        timestamp: new Date(parseInt(c.id, 10)) // 使用卡片 ID 作為時間戳（轉換為整數）
                     });
                 }
             });
 
             // 如果沒有歷史記錄，則當前價格就是最低價
-            if (allRecordsForCompare.length <= 1) {
+            if (allRecordsForCompare.length === 0) {
                 return { isBest: true, message: "歷史最低價", backgroundColor: "bg-green-100" };
             }
             
             // 使用與主頁面相同的比價邏輯
             const bestDeal = allRecordsForCompare.reduce((best, cur) => {
-                const curUnitPrice = cur.unitPrice !== undefined && cur.unitPrice !== null ? cur.unitPrice : Infinity;
-                const bestUnitPrice = best.unitPrice !== undefined && best.unitPrice !== null ? best.unitPrice : Infinity;
+                // 確保 unitPrice 是有效數字
+                const curUnitPrice = (cur.unitPrice !== undefined && cur.unitPrice !== null && !isNaN(cur.unitPrice)) ? parseFloat(cur.unitPrice.toFixed(6)) : Infinity;
+                const bestUnitPrice = (best.unitPrice !== undefined && best.unitPrice !== null && !isNaN(best.unitPrice)) ? parseFloat(best.unitPrice.toFixed(6)) : Infinity;
+                
+                // 如果單價相同，優先選擇時間較早的
+                if (Math.abs(curUnitPrice - bestUnitPrice) < 0.000001) {
+                    const curTime = cur.timestamp ? new Date(cur.timestamp).getTime() : 0;
+                    const bestTime = best.timestamp ? new Date(best.timestamp).getTime() : 0;
+                    return curTime <= bestTime ? cur : best;
+                }
+                
                 return curUnitPrice < bestUnitPrice ? cur : best;
             });
 
-            const isBest = calculatedUnitPrice <= (bestDeal.unitPrice !== undefined && bestDeal.unitPrice !== null ? bestDeal.unitPrice : Infinity);
+            // 確保當前卡片的 unitPrice 是有效數字
+            const currentUnitPrice = (calculatedUnitPrice !== undefined && calculatedUnitPrice !== null && !isNaN(calculatedUnitPrice)) ? parseFloat(calculatedUnitPrice.toFixed(6)) : Infinity;
+            const bestUnitPrice = (bestDeal.unitPrice !== undefined && bestDeal.unitPrice !== null && !isNaN(bestDeal.unitPrice)) ? parseFloat(bestDeal.unitPrice.toFixed(6)) : Infinity;
+            
+            // 檢查是否為最佳價格（允許小數點誤差）
+            const isBest = Math.abs(currentUnitPrice - bestUnitPrice) < 0.000001;
             
             if (isBest) {
                 return { isBest: true, message: "歷史最低價", backgroundColor: "bg-green-100" };

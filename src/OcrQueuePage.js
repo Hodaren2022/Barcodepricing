@@ -3,7 +3,6 @@ import { ArrowLeft, Trash2, Clock, AlertCircle, CheckCircle } from 'lucide-react
 import { db } from './firebase-config.js';
 import { doc, setDoc, addDoc, collection, serverTimestamp, getDoc, query, where, getDocs } from "firebase/firestore";
 import { calculateUnitPrice, calculateFinalPrice, formatUnitPrice } from './utils/priceCalculations';
-import StoreSelector from './StoreSelector'; // 確保導入 StoreSelector
 import { showUserFriendlyError, handleFirestoreSaveError } from './utils/errorHandler'; // 導入錯誤處理工具
 
 // 計算 localStorage 使用量的函數
@@ -52,7 +51,8 @@ function DeleteConfirmation({ card, onClose, onConfirm }) {
     );
 }
 
-function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSelect }) {
+function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSelect, 
+    isStoreSelectorOpen, onStoreSelectCallback, onCloseStoreSelector }) {
     const [queueStats, setQueueStats] = useState({
         total: 0,
         oldest: null,
@@ -71,9 +71,6 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     
     // 新增狀態：正在編輯的卡片
     const [editingCard, setEditingCard] = useState(null);
-    
-    // 新增狀態：商店選擇器顯示狀態
-    const [showStoreSelector, setShowStoreSelector] = useState(false);
     
     // 新增狀態：比價結果
     const [priceComparisonResults, setPriceComparisonResults] = useState({});
@@ -147,7 +144,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
         if (!card.storeName || card.storeName.trim() === '') {
             // 如果商店名稱為空白，顯示商店選擇器
             setEditingCard(card);
-            setShowStoreSelector(true);
+            onStoreSelectCallback(card); // 調用從父組件傳入的回調函數
         } else {
             // 如果商店名稱不為空白，直接儲存（不再彈出確認對話框）
             try {
@@ -199,22 +196,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     // 處理商店欄位點擊
     const handleStoreClick = (card) => {
         setEditingCard(card);
-        setShowStoreSelector(true);
-    };
-
-    // 處理商店選擇器關閉
-    const handleCloseStoreSelector = () => {
-        setShowStoreSelector(false);
-        setEditingCard(null);
-    };
-
-    // 處理商店選擇（自動套用選擇並關閉選擇器）
-    const handleStoreSelectForQueue = async (selectedStore) => {
-        if (editingCard) {
-            // 這是手動編輯卡片時的商店選擇
-            handleCardChange(editingCard.id, 'storeName', selectedStore);
-            handleCloseStoreSelector();
-        }
+        onStoreSelectCallback(card); // 調用從父組件傳入的回調函數
     };
 
     // 儲存 OCR 卡片到 Firebase
@@ -376,7 +358,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     }, [pendingOcrCards, checkIfBestPrice]);
 
     return (
-        <div className={`min-h-screen p-4 sm:p-8 ${theme.light}`}>
+        <div className={`min-h-screen p-4 sm:p-8 ${theme}`}>
             <div className="max-w-2xl mx-auto">
                 <div className="flex items-center mb-6 border-b pb-4">
                     <button onClick={onBack} className="flex items-center text-indigo-600 hover:text-indigo-800 mr-4">
@@ -686,15 +668,6 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                     card={deleteConfirmation}
                     onClose={cancelDelete}
                     onConfirm={confirmDelete}
-                />
-            )}
-            
-            {/* 商店選擇器對話框 - 為待辨識序列管理頁面定制 */}
-            {showStoreSelector && (
-                <StoreSelector 
-                    theme={theme} 
-                    onSelect={handleStoreSelectForQueue} 
-                    onClose={handleCloseStoreSelector}
                 />
             )}
         </div>

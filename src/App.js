@@ -300,12 +300,23 @@ function App() {
     const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
     const [isCaptureModalOpen, setIsCaptureModalOpen] = useState(false);
     const [isStoreSelectorOpen, setIsStoreSelectorOpen] = useState(false);
+    const [isOcrQueueStoreSelectorOpen, setIsOcrQueueStoreSelectorOpen] = useState(false); // 新增狀態
+    const [editingOcrCard, setEditingOcrCard] = useState(null); // 新增狀態
     const [currentPage, setCurrentPage] = useState('main'); // 'main', 'allRecords', 'ocrQueue'
     const [ocrResult, setOcrResult] = useState(null);
     const [capturedImage, setCapturedImage] = useState(null); // 新增的狀態
     
     // 新增狀態：待辨識序列
-    const [pendingOcrCards, setPendingOcrCards] = useState([]);
+    const [pendingOcrCards, setPendingOcrCards] = useState(() => {
+        // 從 localStorage 恢復待辨識卡片
+        const savedCards = localStorage.getItem('pendingOcrCards');
+        return savedCards ? JSON.parse(savedCards) : [];
+    });
+    
+    // 添加 useEffect 來保存 pendingOcrCards 到 localStorage
+    useEffect(() => {
+        localStorage.setItem('pendingOcrCards', JSON.stringify(pendingOcrCards));
+    }, [pendingOcrCards]);
     
     useEffect(() => {
         // 使用新的價格計算函數來確定最終價格
@@ -890,12 +901,16 @@ function App() {
                     pendingOcrCards={pendingOcrCards}
                     onRemoveCard={handleRemovePendingOcrCard}
                     onStoreSelect={setPendingOcrCards}
+                    isStoreSelectorOpen={isOcrQueueStoreSelectorOpen}
+                    onStoreSelectCallback={handleOcrQueueStoreSelect}
+                    onCloseStoreSelector={handleOcrQueueStoreSelectorClose}
                 />
             )}
 
             {isThemeModalOpen && <ThemeSelector theme={currentTheme} saveTheme={saveUserTheme} onClose={() => setIsThemeModalOpen(false)} />}
             {isCaptureModalOpen && <AIOcrCaptureModal theme={currentTheme} onAnalysisSuccess={handleAiCaptureSuccess} onClose={handleCaptureModalClose} stream={streamRef.current} onQueueNextCapture={handleQueueNextCapture} />}
             {isStoreSelectorOpen && <StoreSelector theme={currentTheme} onSelect={handleStoreSelect} onClose={() => setIsStoreSelectorOpen(false)} />}
+            {isOcrQueueStoreSelectorOpen && <StoreSelector theme={currentTheme} onSelect={handleOcrQueueStoreSelectConfirm} onClose={handleOcrQueueStoreSelectorClose} />}
         </div>
     );
 }

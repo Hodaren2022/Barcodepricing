@@ -70,7 +70,8 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     const [deleteConfirmation, setDeleteConfirmation] = useState(null);
     
     // 新增狀態：正在編輯的卡片
-    const [editingCard, setEditingCard] = useState(null);
+    // 移除 editingCard 狀態，因為現在由父組件控制
+    // const [editingCard, setEditingCard] = useState(null);
     
     // 新增狀態：比價結果
     const [priceComparisonResults, setPriceComparisonResults] = useState({});
@@ -143,7 +144,6 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
         // 檢查商店名稱是否為空白
         if (!card.storeName || card.storeName.trim() === '') {
             // 如果商店名稱為空白，顯示商店選擇器
-            setEditingCard(card);
             onStoreSelectCallback(card); // 調用從父組件傳入的回調函數
         } else {
             // 如果商店名稱不為空白，直接儲存（不再彈出確認對話框）
@@ -195,7 +195,6 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
 
     // 處理商店欄位點擊
     const handleStoreClick = (card) => {
-        setEditingCard(card);
         onStoreSelectCallback(card); // 調用從父組件傳入的回調函數
     };
 

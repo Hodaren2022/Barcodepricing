@@ -440,6 +440,31 @@ function App() {
         }
     }, [isAuthReady, userId, setProductName, setLookupStatus, setProductHistory, setStatusMessage]);
 
+    // 新增函數：處理 OCR 隊列的商店選擇
+    const handleOcrQueueStoreSelect = useCallback((card) => {
+        setEditingOcrCard(card);
+        setIsOcrQueueStoreSelectorOpen(true);
+    }, [setEditingOcrCard, setIsOcrQueueStoreSelectorOpen]);
+
+    // 新增函數：處理 OCR 隊列的商店選擇確認
+    const handleOcrQueueStoreSelectConfirm = useCallback((selectedStore) => {
+        if (editingOcrCard) {
+            // 更新待辨識卡片的商店名稱
+            const updatedCards = pendingOcrCards.map(card => 
+                card.id === editingOcrCard.id ? { ...card, storeName: selectedStore } : card
+            );
+            setPendingOcrCards(updatedCards);
+        }
+        setIsOcrQueueStoreSelectorOpen(false);
+        setEditingOcrCard(null);
+    }, [editingOcrCard, pendingOcrCards, setPendingOcrCards, setIsOcrQueueStoreSelectorOpen, setEditingOcrCard]);
+
+    // 新增函數：處理 OCR 隊列的商店選擇器關閉
+    const handleOcrQueueStoreSelectorClose = useCallback(() => {
+        setIsOcrQueueStoreSelectorOpen(false);
+        setEditingOcrCard(null);
+    }, [setIsOcrQueueStoreSelectorOpen, setEditingOcrCard]);
+
     // 正確地提前定義 performSaveAndCompare 函數（必須在 saveAndComparePrice 之前定義）
     const performSaveAndCompare = useCallback(async (selectedStore) => {
         const finalStoreName = selectedStore || storeName;

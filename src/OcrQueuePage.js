@@ -357,7 +357,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     }, [pendingOcrCards, checkIfBestPrice]);
 
     return (
-        <div className={`min-h-screen p-4 sm:p-8 ${theme}`}>
+        <div className="min-h-screen p-4 sm:p-8">
             <div className="max-w-2xl mx-auto">
                 <div className="flex items-center mb-6 border-b pb-4">
                     <button onClick={onBack} className="flex items-center text-indigo-600 hover:text-indigo-800 mr-4">

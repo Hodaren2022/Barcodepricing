@@ -158,7 +158,6 @@ function StoreSelector({ theme, onSelect, onClose }) {
                                 onChange={(e) => setOtherStore(e.target.value)}
                                 placeholder="輸入商店名稱"
                                 className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
-                                autoFocus
                             />
                         </div>
                     )}

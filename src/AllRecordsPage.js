@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffect } from 'react';
-import { ArrowLeft, Database, TrendingUp, Edit, Trash2, Save, X, CheckCircle, Search } from 'lucide-react';
+import { ArrowLeft, Database, TrendingUp, Edit, Trash2, Save, X, CheckCircle, Search, ArrowUp } from 'lucide-react';
 import { collection, getDocs, query, orderBy, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { calculateUnitPrice, formatUnitPrice } from './utils/priceCalculations';
 import StoreSelector from './StoreSelector';
@@ -293,6 +293,7 @@ function AllRecordsPage({ theme, onBack, db, userId, isAuthReady }) {
     const [editingRecord, setEditingRecord] = useState(null);
     const [deletingRecord, setDeletingRecord] = useState(null);
     const [successMessage, setSuccessMessage] = useState('');
+    const [isScrollButtonVisible, setIsScrollButtonVisible] = useState(false); // 回到頂端按鈕顯示狀態
     const scrollPositionRef = useRef(0); // For scroll restoration
     const [isAfterDelete, setIsAfterDelete] = useState(false); // Signal for scroll restoration
     const [searchQuery, setSearchQuery] = useState('');
@@ -764,6 +765,25 @@ function AllRecordsPage({ theme, onBack, db, userId, isAuthReady }) {
         setIsSearchOpen(!isSearchOpen);
     };
 
+    // 監聽滾動事件，決定按鈕顯示
+    const handleScroll = useCallback(() => {
+        const scrollThreshold = 3 * window.innerHeight; // 3 個頁面高度作為顯示閾值
+        setIsScrollButtonVisible(window.scrollY > scrollThreshold);
+    }, []);
+
+    useEffect(() => {
+        window.addEventListener('scroll', handleScroll); // 註冊滾動事件監聽器
+        return () => window.removeEventListener('scroll', handleScroll); // 移除監聽器
+    }, [handleScroll]);
+
+    // 點擊回到頂端
+    const scrollToTop = useCallback(() => {
+        window.scrollTo({
+            top: 0,
+            behavior: 'smooth', // 使用平滑滾動效果
+        });
+    }, []);
+
     if (loading) {
         return (
             <div className="min-h-screen p-4 sm:p-8 bg-gray-100">
@@ -789,6 +809,32 @@ function AllRecordsPage({ theme, onBack, db, userId, isAuthReady }) {
     return (
         <div className="min-h-screen p-4 sm:p-8 bg-gray-100">
             <div className="max-w-4xl mx-auto pb-28"> {/* Added pb-28 for floating button */}
+                {/* 浮動回到頂端按鈕 */}
+                <button
+                    onClick={scrollToTop} // 點擊時呼叫滾動函數
+                    className={`
+                        fixed bottom-4 right-4 z-50 p-3 text-white rounded-full shadow-lg 
+                        transition-all duration-300 ease-in-out transform
+                        ${theme.primary} ${theme.hover}
+                        ${isScrollButtonVisible 
+                            ? 'opacity-100 translate-y-0 visible' // 顯示時：完全可見且位置正常
+                            : 'opacity-0 translate-y-4 invisible' // 隱藏時：透明度為 0 且略微向下位移
+                        }
+                        focus:outline-none focus:ring-2 focus:ring-offset-2
+                        ${theme.color === 'indigo' ? 'focus:ring-indigo-500' :
+                          theme.color === 'blue' ? 'focus:ring-blue-500' :
+                          theme.color === 'green' ? 'focus:ring-green-500' :
+                          theme.color === 'red' ? 'focus:ring-red-500' :
+                          theme.color === 'orange' ? 'focus:ring-orange-500' :
+                          theme.color === 'purple' ? 'focus:ring-purple-500' : ''}
+                        md:p-4  // 桌面加大按鈕
+                    `}
+                    aria-label="回到頁頂端" // 無障礙輔助標籤
+                    title="回到頁頂端"
+                >
+                    <ArrowUp size={20} className="md:size-24" /> {/* 使用 Lucide React 圖示 */}
+                </button>
+                
                 <SuccessMessage message={successMessage} />
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6">
                     <div className="flex items-center mb-4 sm:mb-0">

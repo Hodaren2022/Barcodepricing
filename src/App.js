@@ -630,8 +630,8 @@ function App() {
     const handleStoreSelect = useCallback((selectedStore) => {
         setStoreName(selectedStore);
         setIsStoreSelectorOpen(false);
-        saveAndComparePrice(selectedStore);
-    }, [saveAndComparePrice]);
+        // 不再自動觸發保存操作，與其他頁面保持一致
+    }, [setStoreName, setIsStoreSelectorOpen]);
 
     const handleCaptureModalClose = useCallback(() => {
         setIsCaptureModalOpen(false);

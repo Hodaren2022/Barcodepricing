@@ -69,14 +69,11 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     // 新增狀態：刪除確認對話框
     const [deleteConfirmation, setDeleteConfirmation] = useState(null);
     
-    // 新增狀態：待儲存的卡片
-    const [cardToSave, setCardToSave] = useState(null);
+    // 新增狀態：正在編輯的卡片
+    const [editingCard, setEditingCard] = useState(null);
     
     // 新增狀態：商店選擇器顯示狀態
     const [showStoreSelector, setShowStoreSelector] = useState(false);
-    
-    // 新增狀態：正在編輯的卡片
-    const [editingCard, setEditingCard] = useState(null);
     
     // 新增狀態：比價結果
     const [priceComparisonResults, setPriceComparisonResults] = useState({});
@@ -149,7 +146,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
         // 檢查商店名稱是否為空白
         if (!card.storeName || card.storeName.trim() === '') {
             // 如果商店名稱為空白，顯示商店選擇器
-            setCardToSave(card);
+            setEditingCard(card);
             setShowStoreSelector(true);
         } else {
             // 如果商店名稱不為空白，直接儲存（不再彈出確認對話框）
@@ -211,14 +208,13 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
         setEditingCard(null);
     };
 
-    // 處理商店選擇（與其他頁面保持一致的行為）
-    const handleStoreSelectForQueue = (selectedStore) => {
+    // 處理商店選擇（自動套用選擇並關閉選擇器）
+    const handleStoreSelectForQueue = async (selectedStore) => {
         if (editingCard) {
-            // 更新卡片的商店名稱
+            // 這是手動編輯卡片時的商店選擇
             handleCardChange(editingCard.id, 'storeName', selectedStore);
+            handleCloseStoreSelector();
         }
-        // 關閉商店選擇器（不自動儲存）
-        handleCloseStoreSelector();
     };
 
     // 儲存 OCR 卡片到 Firebase
@@ -693,7 +689,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                 />
             )}
             
-            {/* 商店選擇器對話框 - 修改為與其他頁面一致的行為 */}
+            {/* 商店選擇器對話框 - 為待辨識序列管理頁面定制 */}
             {showStoreSelector && (
                 <StoreSelector 
                     theme={theme} 

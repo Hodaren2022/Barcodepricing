@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, Trash2, Clock, AlertCircle, CheckCircle } from 'lucide-react';
 import { db } from './firebase-config.js';
-import { doc, setDoc, addDoc, collection, serverTimestamp, getDoc, query, where, getDocs } from "firebase/firestore";
+import { doc, setDoc, addDoc, collection, serverTimestamp, getDoc } from "firebase/firestore";
 import { calculateUnitPrice, calculateFinalPrice, formatUnitPrice } from './utils/priceCalculations';
 import { showUserFriendlyError, handleFirestoreSaveError } from './utils/errorHandler'; // 導入錯誤處理工具
 
@@ -262,7 +262,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
     }
 
     // 新增函數：檢查價格是否為歷史最低（包含待辨識序列中的卡片）
-    const checkIfBestPrice = useCallback(async (card, allCards) => {
+    const checkIfBestPrice = useCallback((card, allCards) => {
         try {
             // 生成產品 ID
             const numericalID = generateProductId(card.scannedBarcode, card.productName, card.storeName);
@@ -278,17 +278,8 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
             
             if (calculatedUnitPrice === null) return null;
             
-            // 查詢 Firebase 中該產品的所有價格記錄
-            const recordsQuery = query(
-                collection(db, "priceRecords"),
-                where("numericalID", "==", numericalID)
-            );
-            
-            const recordsSnap = await getDocs(recordsQuery);
-            const records = recordsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            
-            // 準備所有記錄以進行比較（包括當前記錄和待辨識序列中的相同產品）
-            let allRecordsForCompare = [...records];
+            // 準備所有記錄以進行比較（僅包括待辨識序列中的相同產品）
+            let allRecordsForCompare = [];
             
             // 添加待辨識序列中相同產品的卡片（包括當前卡片）
             const sameProductCards = allCards.filter(c => 
@@ -309,7 +300,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                 }
             });
 
-            // 如果沒有歷史記錄，則當前價格就是最低價
+            // 如果沒有待辨識序列中的記錄，則當前價格就是最低價
             if (allRecordsForCompare.length === 0) {
                 return { isBest: true, message: "歷史最低價", backgroundColor: "bg-green-100" };
             }
@@ -350,17 +341,17 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
 
     // 當待辨識卡片列表改變時，重新計算比價結果
     useEffect(() => {
-        const fetchPriceComparisonResults = async () => {
+        const calculatePriceComparisonResults = () => {
             const results = {};
             for (const card of pendingOcrCards) {
-                const result = await checkIfBestPrice(card, pendingOcrCards);
+                const result = checkIfBestPrice(card, pendingOcrCards);
                 results[card.id] = result;
             }
             setPriceComparisonResults(results);
         };
         
         if (pendingOcrCards.length > 0) {
-            fetchPriceComparisonResults();
+            calculatePriceComparisonResults();
         } else {
             setPriceComparisonResults({});
         }

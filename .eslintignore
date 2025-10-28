@@ -1,0 +1,13 @@
+# 打包文件
+build/
+dist/
+
+# 依賴目錄
+node_modules/
+
+# 系統文件
+.git/
+
+# 大型輸出文件
+repomix-output*.txt
+*.jpg

@@ -9,6 +9,7 @@ import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, orderBy
 import { calculateUnitPrice, calculateFinalPrice, formatUnitPrice } from './utils/priceCalculations';
 import OcrQueuePage from './OcrQueuePage';
 import { showUserFriendlyError, handleFirestoreSaveError } from './utils/errorHandler'; // 導入錯誤處理工具
+import { v4 as uuidv4 } from 'uuid'; // 引入 uuid 函式庫來生成本地 ID
 
 // ----------------------------------------------------------------------------
 // 1. 核心設定與工具函數 (Core Setup & Utilities)
@@ -651,12 +652,69 @@ function App() {
         }
     }, [setBarcode, setProductName, setCurrentPrice, setStoreName, setDiscountDetails, setOcrResult, setStatusMessage, setLookupStatus, setQuantity, setUnitType, setCapturedImage]);
 
+    // 定義一個新的函式來處理 Firebase 備份
+    const backupOcrCardToFirebase = useCallback(async (cardData) => {
+        // 檢查 Firebase 是否準備好
+        if (!isAuthReady || !userId) {
+            // 由於功能要求是自動備份，若服務未準備好，則將其視為 pending 或 error (可選)
+            console.warn("Firebase 服務尚未準備好，跳過備份。");
+            // 由於此專案似乎有 MVP 階段屏蔽 Firebase 的歷史需求，
+            // 這裡可以選擇將狀態設為 'error' 或保留 'pending'。
+            // 為避免影響核心功能，建議在此處直接返回，讓卡片保持 'pending' 狀態。
+            return;
+        }
+
+        const cardToSave = {
+            ...cardData,
+            userId: userId, // 儲存用戶 ID
+            timestamp: serverTimestamp(), // 使用 Firebase 服務器時間戳
+            // 移除本地 ID 和同步狀態，因為這些只用於本地 UI
+            id: undefined, 
+            syncStatus: undefined
+        };
+
+        try {
+            // 將卡片數據儲存到 pendingOcrCards 集合
+            const docRef = await addDoc(collection(db, "pendingOcrCards"), cardToSave);
+            
+            // 成功後更新本地狀態
+            setPendingOcrCards(prevCards => 
+                prevCards.map(c => 
+                    c.id === cardData.id ? { ...c, syncStatus: 'success', fbDocId: docRef.id } : c
+                )
+            );
+
+        } catch (error) {
+            console.error("Firebase 待辨識卡片備份失敗:", error);
+            handleFirestoreSaveError(error, "備份待辨識卡片"); // 使用錯誤處理機制
+            
+            // 失敗後更新本地狀態
+            setPendingOcrCards(prevCards => 
+                prevCards.map(c => 
+                    c.id === cardData.id ? { ...c, syncStatus: 'error' } : c
+                )
+            );
+        }
+    }, [isAuthReady, userId, setPendingOcrCards]);
+
     // 新增函數：將辨識結果加入待確認序列
     const handleQueueNextCapture = useCallback((result) => {
-        // 將結果加入待確認的辨識卡片中
-        setPendingOcrCards(prev => [...prev, { ...result, id: Date.now() }]);
+        // 1. 建立具有初始同步狀態的新卡片物件
+        const newCard = {
+            ...result,
+            id: uuidv4(), // 確保本地狀態有一個唯一 ID
+            timestamp: Date.now(), // 本地時間戳 (用於排序/顯示)
+            syncStatus: 'pending', // 初始狀態設為處理中
+        };
+        
+        // 2. 更新本地狀態 (立即顯示卡片)
+        setPendingOcrCards(prev => [...prev, newCard]);
+
+        // 3. 觸發 Firebase 備份
+        backupOcrCardToFirebase(newCard); 
+        
         setStatusMessage(`已將辨識結果加入待確認序列！`);
-    }, []);
+    }, [setPendingOcrCards, backupOcrCardToFirebase]);
 
     // 新增函數：移除待確認的辨識卡片
     const handleRemovePendingOcrCard = useCallback((cardId) => {

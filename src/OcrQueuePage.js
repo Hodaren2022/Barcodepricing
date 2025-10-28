@@ -469,7 +469,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                     {pendingOcrCards.map((card) => (
                         <div 
                             key={card.id} 
-                            className={`bg-white p-4 rounded-lg shadow border-4 ${
+                            className={`bg-white p-4 rounded-lg shadow border-4 relative ${
                                 priceComparisonResults[card.id]?.isBest 
                                     ? 'border-green-500' 
                                     : 'border-yellow-500'
@@ -637,6 +637,28 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                     <div className="mt-2 text-xs text-gray-500">
                                         <p>加入時間: {formatTime(card.id)}</p>
                                         <p>運行時間: {calculateDuration(card.id)}</p>
+                                    </div>
+                                    
+                                    {/* 新增狀態圖示區塊 - 位於運行時間下面 */}
+                                    <div className="absolute bottom-2 right-2">
+                                        {card.syncStatus === 'pending' && (
+                                            <Clock 
+                                                className="w-4 h-4 text-yellow-500 animate-spin" 
+                                                title="正在同步至 Firebase..." 
+                                            />
+                                        )}
+                                        {card.syncStatus === 'success' && (
+                                            <CheckCircle 
+                                                className="w-4 h-4 text-green-500" 
+                                                title="已成功同步至 Firebase" 
+                                            />
+                                        )}
+                                        {card.syncStatus === 'error' && (
+                                            <AlertCircle 
+                                                className="w-4 h-4 text-red-500" 
+                                                title="同步失敗，請檢查網路或重試" 
+                                            />
+                                        )}
                                     </div>
                                 </div>
                                 <div className="flex flex-col">

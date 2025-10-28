@@ -327,10 +327,199 @@ function App() {
         return savedCards ? JSON.parse(savedCards) : [];
     });
     
-    // 添加 useEffect 來保存 pendingOcrCards 到 localStorage
+    // 新增狀態：跟踪是否已從 Firebase 加載數據
+    const [isFirebaseDataLoaded, setIsFirebaseDataLoaded] = useState(false);
+    
+    // 新增狀態：跟踪上次同步的數據哈希值
+    const [lastSyncedDataHash, setLastSyncedDataHash] = useState('');
+    
+    // 新增狀態：跟踪上次同步時間
+    const [lastSyncTime, setLastSyncTime] = useState(0);
+    
+    // 計算數據哈希值的函數
+    const calculateDataHash = useCallback((data) => {
+        // 將數據轉換為字符串並計算簡單哈希
+        const str = JSON.stringify(data, Object.keys(data).sort());
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // 轉換為32位整數
+        }
+        return hash.toString();
+    }, []);
+    
+    // 新增函數：同步 pendingOcrCards 到 Firebase
+    const syncPendingOcrCardsToFirebase = useCallback(async (cards) => {
+        // 只有在用戶已認證時才同步（不需要等待 Firebase 數據加載完成）
+        if (!isAuthReady || !userId) {
+            console.log("Firebase 尚未準備好或無用戶 ID，跳過雲端同步。");
+            return;
+        }
+        
+        // 計算當前數據的哈希值
+        const currentDataHash = calculateDataHash(cards);
+        
+        // 檢查是否在短時間內重複同步（頻率限制）
+        const now = Date.now();
+        const timeSinceLastSync = now - lastSyncTime;
+        if (timeSinceLastSync < 5000) { // 5秒內不重複同步
+            console.log("同步頻率過高，跳過本次同步。");
+            return;
+        }
+        
+        // 如果數據沒有變化，則跳過同步
+        if (currentDataHash === lastSyncedDataHash) {
+            console.log("數據未發生變化，跳過雲端同步。");
+            return;
+        }
+
+        try {
+            // 使用用戶 ID 作為 Document ID，在 ocrQueues Collection 中
+            const queueRef = doc(db, "ocrQueues", userId);
+
+            // 儲存整個卡片陣列 (如果陣列大小在 Firestore 限制內)
+            await setDoc(queueRef, {
+                cards: cards, // 整個 pendingOcrCards 陣列
+                lastUpdated: serverTimestamp(), // 記錄最後更新時間
+                userId: userId // 保存用戶 ID
+            }, { merge: true });
+
+            console.log("待辨識序列已成功同步至 Firebase 雲端。");
+            
+            // 更新最後同步的數據哈希值和時間
+            setLastSyncedDataHash(currentDataHash);
+            setLastSyncTime(now);
+            
+            // 更新卡片的同步狀態為成功（只更新那些狀態不是成功的卡片）
+            const updatedCards = cards.map(card => ({
+                ...card,
+                syncStatus: card.syncStatus === 'success' ? 'success' : 'success'
+            }));
+            
+            // 只有當有卡片狀態需要更新時才更新狀態
+            const needsUpdate = cards.some(card => card.syncStatus !== 'success');
+            if (needsUpdate) {
+                setPendingOcrCards(updatedCards);
+            }
+        } catch (error) {
+            console.error("Firebase 雲端同步失敗:", error);
+            // 不再顯示錯誤給用戶，因為這可能會干擾用戶體驗
+            
+            // 更新卡片的同步狀態為錯誤（只更新那些狀態不是錯誤的卡片）
+            const updatedCards = cards.map(card => ({
+                ...card,
+                syncStatus: card.syncStatus === 'error' ? 'error' : 'error'
+            }));
+            
+            // 只有當有卡片狀態需要更新時才更新狀態
+            const needsUpdate = cards.some(card => card.syncStatus !== 'error');
+            if (needsUpdate) {
+                setPendingOcrCards(updatedCards);
+            }
+        }
+    }, [isAuthReady, userId, lastSyncedDataHash, lastSyncTime, calculateDataHash]);
+    
+    // 添加 useEffect 來保存 pendingOcrCards 到 localStorage 和雲端
     useEffect(() => {
+        // 1. 本地持久化
         localStorage.setItem('pendingOcrCards', JSON.stringify(pendingOcrCards));
-    }, [pendingOcrCards]);
+        
+        // 2. 雲端同步（不需要等待 Firebase 數據加載完成）
+        // 只有當有卡片時才觸發同步
+        if (pendingOcrCards.length > 0) {
+            syncPendingOcrCardsToFirebase(pendingOcrCards);
+        }
+    }, [pendingOcrCards, syncPendingOcrCardsToFirebase]);
+    
+    // 新增 useEffect：從 Firebase 載入數據
+    useEffect(() => {
+        if (isAuthReady && userId && !isFirebaseDataLoaded) {
+            const loadCards = async () => {
+                try {
+                    const queueRef = doc(db, "ocrQueues", userId);
+                    const docSnap = await getDoc(queueRef);
+
+                    // 獲取本地數據
+                    const savedLocalCards = localStorage.getItem('pendingOcrCards');
+                    let localCards = [];
+                    if (savedLocalCards) {
+                         try {
+                             localCards = JSON.parse(savedLocalCards);
+                         } catch (parseError) {
+                             console.error("解析本地數據失敗:", parseError);
+                             localStorage.removeItem('pendingOcrCards'); // 清除損壞的數據
+                         }
+                    }
+                    
+                    // 獲取本地最後更新時間
+                    const localLastUpdated = localStorage.getItem('pendingOcrCardsLastUpdated');
+                    const localLastUpdatedDate = localLastUpdated ? new Date(localLastUpdated) : new Date(0);
+
+                    if (docSnap.exists() && Array.isArray(docSnap.data().cards)) {
+                        const firebaseCards = docSnap.data().cards;
+                        const firebaseLastUpdated = docSnap.data().lastUpdated?.toDate?.() || new Date(0);
+                        
+                        // 比較本地和雲端數據的時間戳
+                        // 如果雲端數據比本地新，則使用雲端數據
+                        if (firebaseLastUpdated > localLastUpdatedDate) {
+                            setPendingOcrCards(firebaseCards);
+                            localStorage.setItem('pendingOcrCards', JSON.stringify(firebaseCards)); // 用雲端數據覆蓋本地
+                            localStorage.setItem('pendingOcrCardsLastUpdated', new Date().toISOString()); // 更新時間戳
+                            console.log("已從 Firebase 恢復待辨識序列。");
+                        } 
+                        // 如果本地數據比雲端新，則上傳本地數據到雲端
+                        else if (firebaseLastUpdated < localLastUpdatedDate && localCards.length > 0) {
+                            // 觸發一次同步到雲端
+                            syncPendingOcrCardsToFirebase(localCards);
+                            console.log("本地數據較新，已同步到 Firebase。");
+                        }
+                        // 如果數據數量不同，合併數據
+                        else if (firebaseCards.length !== localCards.length) {
+                            // 創建一個基於 ID 的映射來避免重複
+                            const localCardMap = new Map(localCards.map(card => [card.id, card]));
+                            const firebaseCardMap = new Map(firebaseCards.map(card => [card.id, card]));
+                            
+                            // 合併兩個集合
+                            const mergedCards = [...localCards];
+                            for (const [id, firebaseCard] of firebaseCardMap) {
+                                if (!localCardMap.has(id)) {
+                                    mergedCards.push(firebaseCard);
+                                }
+                            }
+                            
+                            // 按時間戳排序
+                            mergedCards.sort((a, b) => a.timestamp - b.timestamp);
+                            
+                            setPendingOcrCards(mergedCards);
+                            localStorage.setItem('pendingOcrCards', JSON.stringify(mergedCards)); // 用合併後的數據覆蓋本地
+                            localStorage.setItem('pendingOcrCardsLastUpdated', new Date().toISOString()); // 更新時間戳
+                            console.log("已從 Firebase 合併待辨識序列。");
+                        }
+                        // 如果數據相同，則不需要做任何事情
+                        else {
+                            console.log("本地和雲端數據一致，無需同步。");
+                        }
+                    } else {
+                        // 如果雲端沒有數據但本地有數據，則上傳本地數據到雲端
+                        if (localCards.length > 0) {
+                            // 注意：這裡我們不直接調用 syncPendingOcrCardsToFirebase，因為 setPendingOcrCards 會觸發上面的 useEffect
+                            // 這樣可以確保數據同步到雲端
+                            console.log("雲端沒有數據，本地數據將在下次更新時同步到 Firebase。");
+                        }
+                    }
+                    
+                    // 標記 Firebase 數據已加載
+                    setIsFirebaseDataLoaded(true);
+                } catch (error) {
+                    console.error("從 Firebase 載入序列失敗:", error);
+                    // 即使加載失敗，也標記為已加載以允許本地操作
+                    setIsFirebaseDataLoaded(true);
+                }
+            };
+            loadCards();
+        }
+    }, [isAuthReady, userId, setPendingOcrCards, syncPendingOcrCardsToFirebase, isFirebaseDataLoaded]);
     
     useEffect(() => {
         // 使用新的價格計算函數來確定最終價格
@@ -722,8 +911,11 @@ function App() {
         
         // 2. 更新本地狀態 (立即顯示卡片)
         setPendingOcrCards(prev => [...prev, newCard]);
+        
+        // 3. 更新本地時間戳
+        localStorage.setItem('pendingOcrCardsLastUpdated', new Date().toISOString());
 
-        // 3. 觸發 Firebase 備份
+        // 4. 觸發 Firebase 備份
         backupOcrCardToFirebase(newCard); 
         
         setStatusMessage(`已將辨識結果加入待確認序列！`);

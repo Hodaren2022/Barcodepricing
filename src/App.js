@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { PaintBucket, DollarSign, Barcode, ClipboardCheck, X, Camera, Zap, FileText, RotateCcw, Database } from 'lucide-react';
+import { PaintBucket, DollarSign, Barcode, ClipboardCheck, X, Camera, Zap, FileText, RotateCcw, Database, Settings as SettingsIcon } from 'lucide-react';
 import AllRecordsPage from './AllRecordsPage';
 import StoreSelector from './StoreSelector';
 import AIOcrCaptureModal from './components/AIOcrCaptureModal';
+import SettingsPage from './components/SettingsPage'; // 新增導入
 import { db } from './firebase-config.js'; // <-- 引入 Firebase
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, orderBy, serverTimestamp } from "firebase/firestore";
@@ -302,7 +303,19 @@ function App() {
     const [isCaptureModalOpen, setIsCaptureModalOpen] = useState(false);
     const [isStoreSelectorOpen, setIsStoreSelectorOpen] = useState(false);
     const [isOcrQueueStoreSelectorOpen, setIsOcrQueueStoreSelectorOpen] = useState(false); // 新增狀態
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false); // 新增狀態
     const [editingOcrCard, setEditingOcrCard] = useState(null); // 新增狀態
+    
+    // 新增函數：處理數據刷新
+    const handleDataRefresh = useCallback((key) => {
+        // 如果清除的是 pendingOcrCards，需要更新狀態
+        if (key === 'pendingOcrCards' || key === 'ALL') {
+            const savedCards = localStorage.getItem('pendingOcrCards');
+            setPendingOcrCards(savedCards ? JSON.parse(savedCards) : []);
+        }
+        // 可以在這裡添加其他需要刷新的狀態
+    }, []);
+
     const [currentPage, setCurrentPage] = useState('main'); // 'main', 'allRecords', 'ocrQueue'
     const [ocrResult, setOcrResult] = useState(null);
     const [capturedImage, setCapturedImage] = useState(null); // 新增的狀態
@@ -770,6 +783,15 @@ function App() {
         <div className={`min-h-screen p-4 sm:p-8 ${themeLight}`}>
             <SaveResultToast result={saveResultToast} onClose={() => setSaveResultToast(null)} />
             
+            {/* 新增 SettingsPage 的渲染 */}
+            {isSettingsOpen && (
+                <SettingsPage 
+                    theme={currentTheme} 
+                    onClose={() => setIsSettingsOpen(false)} 
+                    onDataChange={handleDataRefresh}
+                />
+            )}
+
             {/* 根據 currentPage 狀態渲染不同頁面 */}
             {currentPage === 'main' && (
                 <div className="max-w-xl mx-auto">
@@ -791,6 +813,8 @@ function App() {
                             </button>
                             <button onClick={() => setCurrentPage('allRecords')} className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`} title="查看所有記錄"><Database className="w-5 h-5" /></button>
                             <button onClick={() => setIsThemeModalOpen(true)} className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`} title="設定介面主題"><PaintBucket className="w-5 h-5" /></button>
+                            {/* 新增設定按鈕 */}
+                            <button onClick={() => setIsSettingsOpen(true)} className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`} title="設定"><SettingsIcon className="w-5 h-5" /></button>
                             <p className="text-sm text-gray-500 hidden sm:block">User: {userId.slice(0, 8)}...</p>
                         </div>
                     </header>

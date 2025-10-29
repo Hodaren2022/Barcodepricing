@@ -306,6 +306,17 @@ function App() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false); // 新增狀態
     const [editingOcrCard, setEditingOcrCard] = useState(null); // 新增狀態
     
+    // 新增 useEffect 來自動清除狀態消息
+    useEffect(() => {
+        let timer;
+        if (statusMessage) {
+            timer = setTimeout(() => {
+                setStatusMessage('');
+            }, 3000); // 3秒後清除消息
+        }
+        return () => clearTimeout(timer);
+    }, [statusMessage]);
+    
     // 新增函數：處理數據刷新
     const handleDataRefresh = useCallback((key) => {
         // 如果清除的是 pendingOcrCards，需要更新狀態

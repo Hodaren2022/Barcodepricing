@@ -1017,6 +1017,20 @@ function App() {
                 message: "容量快滿，請儘快確認卡片",
                 duration: 2000
             });
+            
+            // 2秒後自動進入AI視覺擷取功能
+            setTimeout(async () => {
+                setFullScreenAlert({ isVisible: false, message: '', duration: 0 });
+                clearForm();
+                const stream = await startCameraStream();
+                if (stream) {
+                    setIsCaptureModalOpen(true);
+                } else {
+                    // 如果無法啟動相機，顯示錯誤訊息
+                    setStatusMessage("無法啟動相機，請檢查權限設置");
+                }
+            }, 2000);
+            
             return;
         }
         

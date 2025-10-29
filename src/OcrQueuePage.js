@@ -640,8 +640,8 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                     </div>
                                     
                                     <div className="mt-2 text-xs text-gray-500">
-                                        <p>加入時間: {formatTime(card.id)}</p>
-                                        <p>運行時間: {calculateDuration(card.id)}</p>
+                                        <p>加入時間: {formatTime(card.timestamp)}</p>
+                                        <p>運行時間: {calculateDuration(card.timestamp)}</p>
                                     </div>
                                     
                                     {/* 新增狀態圖示區塊 - 位於運行時間下面 */}

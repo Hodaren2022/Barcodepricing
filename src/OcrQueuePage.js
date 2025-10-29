@@ -78,7 +78,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
 
     useEffect(() => {
         if (pendingOcrCards.length > 0) {
-            const timestamps = pendingOcrCards.map(card => card.id);
+            const timestamps = pendingOcrCards.map(card => card.timestamp);
             setQueueStats({
                 total: pendingOcrCards.length,
                 oldest: Math.min(...timestamps),

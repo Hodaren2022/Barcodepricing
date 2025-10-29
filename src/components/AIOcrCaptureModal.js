@@ -83,19 +83,29 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream, onQueueN
     const handleCapture = useCallback(() => {
         if (!videoRef.current || !videoRef.current.srcObject) return;
         const video = videoRef.current;
+        
+        // 計算預覽框在視頻中的實際像素位置和尺寸 (75% 中心區域)
+        const cropWidth = video.videoWidth * 0.75;
+        const cropHeight = video.videoHeight * 0.75;
+        const cropX = (video.videoWidth - cropWidth) / 2;
+        const cropY = (video.videoHeight - cropHeight) / 2;
+        
+        // 創建最終的 canvas 來繪製裁切後的圖片
         const canvas = document.createElement('canvas');
-        const sWidth = video.videoWidth * 0.75;
-        const sHeight = video.videoHeight * 0.75;
-        const sx = (video.videoWidth - sWidth) / 2;
-        const sy = (video.videoHeight - sHeight) / 2;
-
-        canvas.width = sWidth;
-        canvas.height = sHeight;
+        canvas.width = cropWidth;
+        canvas.height = cropHeight;
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, sWidth, sHeight);
+        
+        // 從視頻中裁切並繪製 75% 中心區域
+        ctx.drawImage(
+            video, 
+            cropX, cropY, cropWidth, cropHeight,  // source rectangle
+            0, 0, cropWidth, cropHeight           // destination rectangle
+        );
+        
         const base64Data = canvas.toDataURL('image/jpeg', 0.9);
         setCapturedImage(base64Data); // 設置擷取的圖片
-        
+
         // Pause video playback after capture, but don't stop the stream
         if (videoRef.current) {
             videoRef.current.pause();

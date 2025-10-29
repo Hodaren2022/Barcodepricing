@@ -195,6 +195,7 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
 
     // 處理商店欄位點擊
     const handleStoreClick = (card) => {
+        // 阻止默认行为，防止移动设备上弹出键盘
         onStoreSelectCallback(card); // 調用從父組件傳入的回調函數
     };
 
@@ -543,7 +544,11 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                                 type="text"
                                                 value={card.storeName || ''}
                                                 onChange={(e) => handleCardChange(card.id, 'storeName', e.target.value)}
-                                                onClick={() => handleStoreClick(card)}
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    handleStoreClick(card);
+                                                }}
+                                                readOnly
                                                 className="w-full px-2 py-0 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 bg-gray-50 cursor-pointer"
                                                 placeholder="點擊選擇商店"
                                             />

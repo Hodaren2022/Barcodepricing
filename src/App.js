@@ -949,6 +949,29 @@ function App() {
     }, [stopCameraStream]);
 
     const handleNewScanClick = async () => {
+        // 檢查待辨識卡片數量是否達到限制
+        const savedCards = localStorage.getItem('pendingOcrCards');
+        const pendingCards = savedCards ? JSON.parse(savedCards) : [];
+        
+        // 如果卡片數量達到12張，禁止擷取
+        if (pendingCards.length >= 12) {
+            setStatusMessage("容量已滿!請先確認卡片!");
+            // 3秒後清除消息
+            setTimeout(() => {
+                setStatusMessage('');
+            }, 3000);
+            return;
+        }
+        
+        // 如果卡片數量達到9張，顯示警告
+        if (pendingCards.length >= 9) {
+            setStatusMessage("容量快滿，請記得確認卡片");
+            // 2秒後清除消息
+            setTimeout(() => {
+                setStatusMessage('');
+            }, 2000);
+        }
+        
         clearForm();
         const stream = await startCameraStream();
         if (stream) {

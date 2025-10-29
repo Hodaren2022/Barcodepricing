@@ -953,9 +953,9 @@ function App() {
         const savedCards = localStorage.getItem('pendingOcrCards');
         const pendingCards = savedCards ? JSON.parse(savedCards) : [];
         
-        // 如果卡片數量達到12張，禁止擷取
-        if (pendingCards.length >= 12) {
-            setStatusMessage("容量已滿!請先確認卡片!");
+        // 如果卡片數量達到11張，禁止擷取
+        if (pendingCards.length >= 11) {
+            setStatusMessage("容量已滿，請先確認卡片");
             // 3秒後清除消息
             setTimeout(() => {
                 setStatusMessage('');
@@ -965,7 +965,7 @@ function App() {
         
         // 如果卡片數量達到9張，顯示警告
         if (pendingCards.length >= 9) {
-            setStatusMessage("容量快滿，請記得確認卡片");
+            setStatusMessage("容量快滿，請儘快確認卡片");
             // 2秒後清除消息
             setTimeout(() => {
                 setStatusMessage('');

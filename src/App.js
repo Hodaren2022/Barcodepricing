@@ -272,9 +272,49 @@ function SaveResultToast({ result, onClose }) {
     );
 }
 
+// ----------------------------------------------------------------------------
+// 5. 全畫面提示窗 (Full Screen Alert)
+// ----------------------------------------------------------------------------
+function FullScreenAlert({ message, isVisible, duration, onClose }) {
+    useEffect(() => {
+        if (isVisible) {
+            const timer = setTimeout(() => {
+                onClose();
+            }, duration);
+            return () => clearTimeout(timer);
+        }
+    }, [isVisible, duration, onClose]);
+
+    if (!isVisible) return null;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75">
+            <div className="bg-white p-8 rounded-xl shadow-2xl max-w-md w-full mx-4 text-center animate-pulse">
+                <div className="text-5xl mb-4">⚠️</div>
+                <h2 className="text-2xl font-bold text-gray-800 mb-4">{message}</h2>
+                <div className="w-full bg-gray-200 rounded-full h-2.5">
+                    <div 
+                        className="bg-blue-600 h-2.5 rounded-full" 
+                        style={{ 
+                            animation: `progress ${duration}ms linear forwards`,
+                            width: '100%'
+                        }}
+                    ></div>
+                </div>
+            </div>
+            
+            <style>{`
+                @keyframes progress {
+                    from { width: 100%; }
+                    to { width: 0%; }
+                }
+            `}</style>
+        </div>
+    );
+}
 
 // ----------------------------------------------------------------------------
-// 5. 主應用程式元件 (App Component)
+// 6. 主應用程式元件 (App Component)
 // ----------------------------------------------------------------------------
 
 function App() {
@@ -282,6 +322,13 @@ function App() {
     const streamRef = useRef(null);
     
     const [saveResultToast, setSaveResultToast] = useState(null);
+    
+    // 新增狀態：全畫面提示窗
+    const [fullScreenAlert, setFullScreenAlert] = useState({
+        isVisible: false,
+        message: '',
+        duration: 0
+    });
 
     // UI 狀態
     const [barcode, setBarcode] = useState('');
@@ -955,21 +1002,22 @@ function App() {
         
         // 如果卡片數量達到11張，禁止擷取
         if (pendingCards.length >= 11) {
-            setStatusMessage("容量已滿，請先確認卡片");
-            // 3秒後清除消息
-            setTimeout(() => {
-                setStatusMessage('');
-            }, 3000);
+            setFullScreenAlert({
+                isVisible: true,
+                message: "容量已滿，請先確認卡片",
+                duration: 3000
+            });
             return;
         }
         
         // 如果卡片數量達到9張，顯示警告
         if (pendingCards.length >= 9) {
-            setStatusMessage("容量快滿，請儘快確認卡片");
-            // 2秒後清除消息
-            setTimeout(() => {
-                setStatusMessage('');
-            }, 2000);
+            setFullScreenAlert({
+                isVisible: true,
+                message: "容量快滿，請儘快確認卡片",
+                duration: 2000
+            });
+            return;
         }
         
         clearForm();
@@ -1008,6 +1056,12 @@ function App() {
     return (
         <div className={`min-h-screen p-4 sm:p-8 ${themeLight}`}>
             <SaveResultToast result={saveResultToast} onClose={() => setSaveResultToast(null)} />
+            <FullScreenAlert 
+                message={fullScreenAlert.message}
+                isVisible={fullScreenAlert.isVisible}
+                duration={fullScreenAlert.duration}
+                onClose={() => setFullScreenAlert({ isVisible: false, message: '', duration: 0 })}
+            />
             
             {/* 新增 SettingsPage 的渲染 */}
             {isSettingsOpen && (

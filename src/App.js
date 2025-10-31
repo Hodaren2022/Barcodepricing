@@ -707,6 +707,51 @@ function App() {
         setIsOcrQueueStoreSelectorOpen(true);
     }, [setEditingOcrCard, setIsOcrQueueStoreSelectorOpen]);
 
+    // 新增函數：儲存 OCR 卡片到 Firebase（獨立函數，可在多處使用）
+    const saveOcrCardToFirebase = useCallback(async (card, storeNameOverride) => {
+        // 生成產品 ID
+        const numericalID = generateProductId(card.scannedBarcode, card.productName, storeNameOverride || card.storeName);
+        
+        // 使用新的價格計算函數來確定最終價格
+        const finalPrice = calculateFinalPrice(card.extractedPrice, card.specialPrice);
+        const priceValue = parseFloat(finalPrice);
+        
+        // 使用 calculateUnitPrice 函數計算單價
+        const calculatedUnitPrice = calculateUnitPrice(priceValue, card.quantity, card.unitType);
+        
+        // 儲存產品資訊
+        const productRef = doc(db, "products", numericalID.toString());
+        const productSnap = await getDoc(productRef);
+        if (!productSnap.exists()) {
+            await setDoc(productRef, {
+                numericalID,
+                barcodeData: card.scannedBarcode,
+                productName: card.productName,
+                createdAt: serverTimestamp(),
+                lastUpdatedBy: "ocr-queue", // 標記為來自 OCR 隊列
+            });
+        }
+        
+        // 儲存價格記錄
+        const priceRecord = {
+            numericalID,
+            productName: card.productName,
+            storeName: storeNameOverride || card.storeName,
+            price: priceValue, // 總價
+            quantity: parseFloat(card.quantity),
+            unitType: card.unitType,
+            unitPrice: calculatedUnitPrice, // 單價
+            discountDetails: card.discountDetails || '',
+            timestamp: serverTimestamp(),
+            recordedBy: "ocr-queue", // 標記為來自 OCR 隊列
+            // 保存原價和特價信息（如果有的話）
+            originalPrice: card.originalPrice ? parseFloat(card.originalPrice) : null,
+            specialPrice: card.specialPrice ? parseFloat(card.specialPrice) : null
+        };
+        
+        await addDoc(collection(db, "priceRecords"), priceRecord);
+    }, []);
+
     // 新增函數：處理 OCR 隊列的商店選擇確認
     const handleOcrQueueStoreSelectConfirm = useCallback((selectedStore) => {
         if (editingOcrCard) {
@@ -715,10 +760,41 @@ function App() {
                 card.id === editingOcrCard.id ? { ...card, storeName: selectedStore } : card
             );
             setPendingOcrCards(updatedCards);
+            
+            // 直接儲存卡片到 Firebase
+            saveOcrCardToFirebase(editingOcrCard, selectedStore)
+                .then(() => {
+                    // 儲存成功後從待辨識序列中移除
+                    setPendingOcrCards(prevCards => prevCards.filter(card => card.id !== editingOcrCard.id));
+                    
+                    // 儲存後更新 localStorage 使用量
+                    setTimeout(() => {
+                        // 這裡我們需要訪問 OcrQueuePage 中的 getLocalStorageUsage 函數
+                        // 由於無法直接訪問，我們可以簡單地重新計算
+                        // 移除未使用的 used 和 quota 變數
+                        // let total = 0;
+                        // for (let key in localStorage) {
+                        //     if (localStorage.hasOwnProperty(key)) {
+                        //         total += (localStorage[key].length + key.length) * 2;
+                        //     }
+                        // }
+                        // const used = (total / 1024).toFixed(2);
+                        // const quota = 5120;
+                        // 移除未使用的 percentage 變數
+                        // const percentage = ((used / quota) * 100).toFixed(2);
+                        
+                        // 注意：我們無法直接更新 OcrQueuePage 的狀態，但可以在下次打開時更新
+                    }, 100);
+                })
+                .catch((error) => {
+                    console.error("儲存失敗:", error);
+                    const userMessage = handleFirestoreSaveError(error, "儲存待辨識卡片");
+                    showUserFriendlyError(userMessage);
+                });
         }
         setIsOcrQueueStoreSelectorOpen(false);
         setEditingOcrCard(null);
-    }, [editingOcrCard, pendingOcrCards, setPendingOcrCards, setIsOcrQueueStoreSelectorOpen, setEditingOcrCard]);
+    }, [editingOcrCard, pendingOcrCards, setPendingOcrCards, setIsOcrQueueStoreSelectorOpen, setEditingOcrCard, saveOcrCardToFirebase]);
 
     // 新增函數：處理 OCR 隊列的商店選擇器關閉
     const handleOcrQueueStoreSelectorClose = useCallback(() => {

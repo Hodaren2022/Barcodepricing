@@ -52,7 +52,7 @@ function DeleteConfirmation({ card, onClose, onConfirm }) {
 }
 
 function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSelect, 
-    isStoreSelectorOpen, onStoreSelectCallback, onCloseStoreSelector }) {
+    isStoreSelectorOpen, onStoreSelectCallback, onCloseStoreSelector, onSaveOcrCardToFirebase }) {
     const [queueStats, setQueueStats] = useState({
         total: 0,
         oldest: null,
@@ -201,6 +201,12 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
 
     // 儲存 OCR 卡片到 Firebase
     const saveOcrCardToFirebase = async (card) => {
+        // 使用從父組件傳入的函數
+        if (onSaveOcrCardToFirebase) {
+            return onSaveOcrCardToFirebase(card);
+        }
+        
+        // 如果沒有傳入函數，則使用原來的實現
         // 生成產品 ID
         const numericalID = generateProductId(card.scannedBarcode, card.productName, card.storeName);
         
@@ -642,28 +648,6 @@ function OcrQueuePage({ theme, onBack, pendingOcrCards, onRemoveCard, onStoreSel
                                     <div className="mt-2 text-xs text-gray-500">
                                         <p>加入時間: {formatTime(card.timestamp)}</p>
                                         <p>運行時間: {calculateDuration(card.timestamp)}</p>
-                                    </div>
-                                    
-                                    {/* 新增狀態圖示區塊 - 位於運行時間下面 */}
-                                    <div className="absolute bottom-2 right-2">
-                                        {card.syncStatus === 'pending' && (
-                                            <Clock 
-                                                className="w-4 h-4 text-yellow-500 animate-spin" 
-                                                title="正在同步至 Firebase..." 
-                                            />
-                                        )}
-                                        {card.syncStatus === 'success' && (
-                                            <CheckCircle 
-                                                className="w-4 h-4 text-green-500" 
-                                                title="已成功同步至 Firebase" 
-                                            />
-                                        )}
-                                        {card.syncStatus === 'error' && (
-                                            <AlertCircle 
-                                                className="w-4 h-4 text-red-500" 
-                                                title="同步失敗，請檢查網路或重試" 
-                                            />
-                                        )}
                                     </div>
                                 </div>
                                 <div className="flex flex-col">

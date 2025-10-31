@@ -450,30 +450,36 @@ function App() {
             setLastSyncTime(now);
             
             // 更新卡片的同步狀態為成功（只更新那些狀態不是成功的卡片）
-            const updatedCards = cards.map(card => ({
-                ...card,
-                syncStatus: card.syncStatus === 'success' ? 'success' : 'success'
-            }));
-            
-            // 只有當有卡片狀態需要更新時才更新狀態
-            const needsUpdate = cards.some(card => card.syncStatus !== 'success');
-            if (needsUpdate) {
-                setPendingOcrCards(updatedCards);
+            // 只有當 cards 不為空數組時才更新狀態
+            if (cards.length > 0) {
+                const updatedCards = cards.map(card => ({
+                    ...card,
+                    syncStatus: 'success'
+                }));
+                
+                // 只有當有卡片狀態需要更新時才更新狀態
+                const needsUpdate = cards.some(card => card.syncStatus !== 'success');
+                if (needsUpdate) {
+                    setPendingOcrCards(updatedCards);
+                }
             }
         } catch (error) {
             console.error("Firebase 雲端同步失敗:", error);
             // 不再顯示錯誤給用戶，因為這可能會干擾用戶體驗
             
             // 更新卡片的同步狀態為錯誤（只更新那些狀態不是錯誤的卡片）
-            const updatedCards = cards.map(card => ({
-                ...card,
-                syncStatus: card.syncStatus === 'error' ? 'error' : 'error'
-            }));
-            
-            // 只有當有卡片狀態需要更新時才更新狀態
-            const needsUpdate = cards.some(card => card.syncStatus !== 'error');
-            if (needsUpdate) {
-                setPendingOcrCards(updatedCards);
+            // 只有當 cards 不為空數組時才更新狀態
+            if (cards.length > 0) {
+                const updatedCards = cards.map(card => ({
+                    ...card,
+                    syncStatus: 'error'
+                }));
+                
+                // 只有當有卡片狀態需要更新時才更新狀態
+                const needsUpdate = cards.some(card => card.syncStatus !== 'error');
+                if (needsUpdate) {
+                    setPendingOcrCards(updatedCards);
+                }
             }
         }
     }, [isAuthReady, userId, lastSyncedDataHash, lastSyncTime, calculateDataHash]);
@@ -484,10 +490,8 @@ function App() {
         localStorage.setItem('pendingOcrCards', JSON.stringify(pendingOcrCards));
         
         // 2. 雲端同步（不需要等待 Firebase 數據加載完成）
-        // 只有當有卡片時才觸發同步
-        if (pendingOcrCards.length > 0) {
-            syncPendingOcrCardsToFirebase(pendingOcrCards);
-        }
+        // 總是觸發同步，即使是空數組也要同步以確保雲端數據與本地一致
+        syncPendingOcrCardsToFirebase(pendingOcrCards);
     }, [pendingOcrCards, syncPendingOcrCardsToFirebase]);
     
     // 新增 useEffect：從 Firebase 載入數據
@@ -527,7 +531,7 @@ function App() {
                             console.log("已從 Firebase 恢復待辨識序列。");
                         } 
                         // 如果本地數據比雲端新，則上傳本地數據到雲端
-                        else if (firebaseLastUpdated < localLastUpdatedDate && localCards.length > 0) {
+                        else if (firebaseLastUpdated < localLastUpdatedDate) { // 移除了 localCards.length > 0 的條件
                             // 觸發一次同步到雲端
                             syncPendingOcrCardsToFirebase(localCards);
                             console.log("本地數據較新，已同步到 Firebase。");
@@ -559,12 +563,12 @@ function App() {
                             console.log("本地和雲端數據一致，無需同步。");
                         }
                     } else {
-                        // 如果雲端沒有數據但本地有數據，則上傳本地數據到雲端
-                        if (localCards.length > 0) {
-                            // 注意：這裡我們不直接調用 syncPendingOcrCardsToFirebase，因為 setPendingOcrCards 會觸發上面的 useEffect
-                            // 這樣可以確保數據同步到雲端
-                            console.log("雲端沒有數據，本地數據將在下次更新時同步到 Firebase。");
-                        }
+                        // 如果雲端沒有數據，確保本地數據也是空的
+                        // 這會處理用戶刪除所有卡片後的情況
+                        setPendingOcrCards([]);
+                        localStorage.setItem('pendingOcrCards', JSON.stringify([]));
+                        localStorage.setItem('pendingOcrCardsLastUpdated', new Date().toISOString());
+                        console.log("雲端沒有數據，已清除本地待辨識序列。");
                     }
                     
                     // 標記 Firebase 數據已加載

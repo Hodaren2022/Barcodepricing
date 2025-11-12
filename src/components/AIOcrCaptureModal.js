@@ -58,7 +58,7 @@ async function callGeminiApiWithRetry(payload, apiUrl, maxRetries = 3) {
     throw lastError;
 }
 
-function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream, onQueueNextCapture }) {
+function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
     const videoRef = useRef(null);
     const [scanError, setScanError] = useState('');
     const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -328,8 +328,8 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream, onQueueN
                     capturedImage: capturedImage  // 添加捕獲的圖像
                 };
                 
-                // 通知父組件將完整分析結果加入序列
-                onQueueNextCapture(finalData);
+                // 直接調用成功回調
+                onAnalysisSuccess(finalData);
             })
             .catch(error => {
                 console.error("AI 分析失敗:", error);
@@ -342,9 +342,9 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream, onQueueN
                     capturedImage: capturedImage,
                     error: error.message
                 };
-                onQueueNextCapture(errorData);
+                onAnalysisSuccess(errorData);
             });
-    }, [capturedImage, onQueueNextCapture]);
+    }, [capturedImage, onAnalysisSuccess]);
 
     const handleSimulatedAnalysis = () => {
         const randomListedPrice = parseFloat((Math.random() * 50 + 100).toFixed(2));

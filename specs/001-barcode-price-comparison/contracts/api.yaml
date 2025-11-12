@@ -1,0 +1,571 @@
+openapi: 3.0.3
+info:
+  title: Barcode Price Comparison API
+  description: API contracts for barcode scanning and price comparison functionality
+  version: 1.0.0
+  contact:
+    name: Barcode Pricing Team
+
+servers:
+  - url: https://firestore.googleapis.com/v1
+    description: Firebase Firestore API
+  - url: https://generativelanguage.googleapis.com/v1beta
+    description: Gemini API for OCR processing
+
+paths:
+  /products:
+    post:
+      summary: Create or update product information
+      description: Creates a new product or updates existing product data from barcode scan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductCreateRequest'
+      responses:
+        '201':
+          description: Product created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '200':
+          description: Product updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          description: Invalid product data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      summary: Search products by barcode
+      description: Retrieve product information by barcode
+      parameters:
+        - name: barcode
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9]{8,13}$'
+      responses:
+        '200':
+          description: Product found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          description: Product not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /price-records:
+    post:
+      summary: Create price record
+      description: Save a new price record from user scan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PriceRecordCreateRequest'
+      responses:
+        '201':
+          description: Price record created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceRecord'
+        '400':
+          description: Invalid price record data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      summary: Get price records for product
+      description: Retrieve price history and comparison data for a p  parameters:
+        - name: productId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 50
+      responses:
+        '200':
+          description: Price records retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceRecordList'
+
+  /price-comparison:
+    get:
+      summary: Get price comparison results
+      description: Compare prices across stores and return lowest price information
+      parameters:
+        - name: productId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: county
+          in: query
+          schema:
+            type: string
+            description: Filter by county for location-based comparison
+      responses:
+        '200':
+          description: Price comparison results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceComparison'
+
+  /ocr/process:
+    post:
+      summary: Process image for OCR
+      description: Extract barcode and price information from price tag image
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: Price tag image file
+                sessionId:
+                  type: string
+                  description: Current store session ID
+      responses:
+        '200':
+          description: OCR processing completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OCRResult'
+        '400':
+          description: Invalid image or processing error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /scan-history:
+    get:
+      summary: Get user scan history
+      description: Retrieve user's scanning history with pagination
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+            description: Filter by specific date (YYYY-MM-DD)
+      responses:
+        '200':
+          description: Scan history retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanHistoryList'
+
+  /store-session:
+    post:
+      summary: Start store session
+      description: Begin a new shopping session at a store
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreSessionCreateRequest'
+      responses:
+        '201':
+          description: Store session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoreSession'
+
+    put:
+      summary: Update store session
+      description: Update current store session activity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreSessionUpdateRequest'
+      responses:
+        '200':
+          description: Store session updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoreSession'
+
+components:
+  schemas:
+    Product:
+      type: object
+      required:
+        - id
+        - barcode
+        - name
+      properties:
+        id:
+          type: string
+          description: Unique product identifier
+        barcode:
+          type: string
+          pattern: '^[0-9]{8,13}$'
+          description: Product barcode (EAN-13, UPC-A, etc.)
+        name:
+          type: string
+          minLength: 2
+          description: Product name
+        brand:
+          type: string
+          description: Product brand
+        image:
+          type: string
+          format: uri
+          description: Product image URL
+        specifications:
+          type: string
+          description: Product specifications
+        category:
+          type: string
+          description: Product category
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProductCreateRequest:
+      type: object
+      required:
+        - barcode
+        - name
+      properties:
+        barcode:
+          type: string
+          pattern: '^[0-9]{8,13}$'
+        name:
+          type: string
+          minLength: 2
+        brand:
+          type: string
+        specifications:
+          type: string
+        category:
+          type: string
+
+    PriceRecord:
+      type: object
+      required:
+        - id
+        - productId
+        - price
+        - storeName
+        - photoLocalPath
+      properties:
+        id:
+          type: string
+          description: Unique price record identifier
+        productId:
+          type: string
+          description: Associated product ID
+        price:
+          type: number
+          minimum: 0
+          description: Product price
+        unitPrice:
+          type: number
+          minimum: 0
+          description: Calculated unit price
+        unit:
+          type: string
+          description: Pricing unit (per kg, per item, etc.)
+        quantity:
+          type: number
+          minimum: 0
+          description: Package quantity
+        storeName:
+          type: string
+          minLength: 2
+          description: Store name
+        storeType:
+          type: string
+          description: Store category
+        photoLocalPath:
+          type: string
+          description: Local storage path for price tag photo (not uploaded to cloud)
+        location:
+          $ref: '#/components/schemas/LocationRecord'
+        scanTimestamp:
+          type: string
+          format: date-time
+        isLowestPrice:
+          type: boolean
+          description: Whether this is the lowest recorded price
+        isAnomaly:
+          type: boolean
+          description: Whether price is flagged as suspicious
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: OCR confidence score
+        source:
+          type: string
+          enum: [OCR_AUTO, USER_MANUAL]
+        syncStatus:
+          type: string
+          enum: [LOCAL, SYNCING, SYNCED, FAILED]
+
+    PriceRecordCreateRequest:
+      type: object
+      required:
+        - productId
+        - price
+        - storeName
+        - photoLocalPath
+      properties:
+        productId:
+          type: string
+        price:
+          type: number
+          minimum: 0
+        unitPrice:
+          type: number
+          minimum: 0
+        unit:
+          type: string
+        quantity:
+          type: number
+          minimum: 0
+        storeName:
+          type: string
+          minLength: 2
+        storeType:
+          type: string
+        photoLocalPath:
+          type: string
+          description: Local storage path for price tag photo
+          format: uri
+        location:
+          $ref: '#/components/schemas/LocationRecord'
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        source:
+          type: string
+          enum: [OCR_AUTO, USER_MANUAL]
+
+    LocationRecord:
+      type: object
+      properties:
+        county:
+          type: string
+          description: County name (縣市)
+        township:
+          type: string
+          description: Township name (鄉鎮)
+        acquisitionMethod:
+          type: string
+          enum: [GPS_AUTO, MANUAL_SELECT, FAILED]
+        accuracy:
+          type: number
+          description: GPS accuracy in meters
+        timestamp:
+          type: string
+          format: date-time
+
+    PriceRecordList:
+      type: object
+      properties:
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/PriceRecord'
+        total:
+          type: integer
+        hasMore:
+          type: boolean
+
+    PriceComparison:
+      type: object
+      properties:
+        productId:
+          type: string
+        lowestPrice:
+          type: number
+        lowestPriceRecord:
+          $ref: '#/components/schemas/PriceRecord'
+        averagePrice:
+          type: number
+        priceRange:
+          type: object
+          properties:
+            min:
+              type: number
+            max:
+              type: number
+        totalRecords:
+          type: integer
+        lastUpdated:
+          type: string
+          format: date-time
+
+    OCRResult:
+      type: object
+      properties:
+        id:
+          type: string
+        recognizedBarcode:
+          type: string
+        recognizedPrice:
+          type: number
+        recognizedStore:
+          type: string
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        processingTime:
+          type: number
+        preprocessingApplied:
+          type: array
+          items:
+            type: string
+        rawOcrText:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    ScanHistory:
+      type: object
+      properties:
+        id:
+          type: string
+        productId:
+          type: string
+        priceRecordId:
+          type: string
+        scanTimestamp:
+          type: string
+          format: date-time
+        wasLowestPrice:
+          type: boolean
+        sessionId:
+          type: string
+
+    ScanHistoryList:
+      type: object
+      properties:
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScanHistory'
+        total:
+          type: integer
+        hasMore:
+          type: boolean
+
+    StoreSession:
+      type: object
+      properties:
+        id:
+          type: string
+        storeName:
+          type: string
+        storeType:
+          type: string
+        startTime:
+          type: string
+          format: date-time
+        lastActivity:
+          type: string
+          format: date-time
+        location:
+          $ref: '#/components/schemas/LocationRecord'
+        status:
+          type: string
+          enum: [ACTIVE, PAUSED, ENDED]
+        scanCount:
+          type: integer
+
+    StoreSessionCreateRequest:
+      type: object
+      required:
+        - storeName
+      properties:
+        storeName:
+          type: string
+          minLength: 2
+        storeType:
+          type: string
+        location:
+          $ref: '#/components/schemas/LocationRecord'
+
+    StoreSessionUpdateRequest:
+      type: object
+      properties:
+        lastActivity:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [ACTIVE, PAUSED, ENDED]
+        scanCount:
+          type: integer
+
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Error code
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          description: Additional error details

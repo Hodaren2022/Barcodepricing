@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffect } from 'react';
-import { ArrowLeft, Database, TrendingUp, Edit, Trash2, Save, X, CheckCircle, Search } from 'lucide-react';
-import { collection, getDocs, query, orderBy, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { ArrowLeft, Database, TrendingUp, Edit, Trash2, Save, X, CheckCircle, Search, AlertTriangle } from 'lucide-react';
+import { collection, getDocs, query, orderBy, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { calculateUnitPrice, formatUnitPrice } from './utils/priceCalculations';
 import StoreSelector from './StoreSelector';
 import { showUserFriendlyError, handleFirestoreSaveError } from './utils/errorHandler'; // 導入錯誤處理工具
@@ -251,8 +251,18 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
                             onEdit={() => onEdit(record)}
                             onDelete={() => onDelete(record)}
                         >
-                            <div className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                            <div className={`flex justify-between items-center p-2 rounded ${record.anomalyFlag?.flagged ? 'bg-yellow-50 border border-yellow-200' : 'bg-gray-50'}`}>
                                 <div>
+                                    {/* 異常標記 */}
+                                    {record.anomalyFlag?.flagged && (
+                                        <div className="flex items-center mb-1">
+                                            <AlertTriangle className="w-4 h-4 text-yellow-600 mr-1" />
+                                            <span className="text-xs text-yellow-700 font-medium">
+                                                異常價格 (偏離{(record.anomalyFlag.deviation * 100).toFixed(1)}%)
+                                            </span>
+                                        </div>
+                                    )}
+                                    
                                     {/* 顯示原價和特價信息 */}
                                     {record.specialPrice ? (
                                         <p className="font-medium">
@@ -274,6 +284,12 @@ function ProductRecord({ product, records, theme, onEdit, onDelete }) {
                                 <div className="text-right">
                                     <p className="text-xs text-gray-500">{record.storeName || '未標註'}</p>
                                     <p className="text-xs text-gray-500">{record.timestamp.toLocaleDateString()}</p>
+                                    {/* 地理位置信息 */}
+                                    {record.locationData && (
+                                        <p className="text-xs text-gray-400">
+                                            GPS: {record.locationData.method}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                         </SwipeableRecord>
@@ -627,7 +643,23 @@ function AllRecordsPage({ theme, onBack, db, userId, isAuthReady }) {
                 unitType: updatedRecord.unitType,
                 unitPrice: updatedRecord.unitPrice,
                 originalPrice: updatedRecord.originalPrice,
-                specialPrice: updatedRecord.specialPrice
+                specialPrice: updatedRecord.specialPrice,
+                // 記錄修正歷史
+                correctionHistory: [
+                    ...(updatedRecord.correctionHistory || []),
+                    {
+                        correctedAt: serverTimestamp(),
+                        correctedBy: userId,
+                        previousValues: {
+                            productName: updatedRecord.originalProductName || updatedRecord.productName,
+                            price: updatedRecord.originalPrice || updatedRecord.price,
+                            quantity: updatedRecord.originalQuantity || updatedRecord.quantity,
+                            unitType: updatedRecord.originalUnitType || updatedRecord.unitType,
+                            storeName: updatedRecord.originalStoreName || updatedRecord.storeName,
+                            discountDetails: updatedRecord.originalDiscountDetails || updatedRecord.discountDetails
+                        }
+                    }
+                ]
             });
             
             // 在編輯模式下，更新本地狀態而不是重新獲取所有數據
@@ -669,7 +701,7 @@ function AllRecordsPage({ theme, onBack, db, userId, isAuthReady }) {
                 await fetchData(); // 非編輯模式下重新獲取數據以更新UI
             }
             
-            showSuccessMessage('記錄已成功更新');
+            showSuccessMessage('記錄已成功更新並記錄修正歷史');
         } catch (error) {
             console.error("更新記錄失敗:", error);
             const userMessage = handleFirestoreSaveError(error, "更新價格記錄");

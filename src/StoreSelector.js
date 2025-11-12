@@ -18,7 +18,7 @@ const initialStores = [
     { name: "其他", sort: 999 }
 ];
 
-function StoreSelector({ theme, onSelect, onClose }) {
+function StoreSelector({ theme, onSelect, onClose, title = "選擇商店" }) {
     const [selectedStore, setSelectedStore] = useState('');
     const [otherStore, setOtherStore] = useState('');
     const [commonStores, setCommonStores] = useState([]);
@@ -112,7 +112,7 @@ function StoreSelector({ theme, onSelect, onClose }) {
                 <div className="p-6 pb-4 flex-shrink-0">
                     <div className="flex justify-between items-center mb-4 border-b pb-2">
                         <h3 className={`text-xl font-bold ${theme.text}`}>
-                            選擇商店
+                            {title}
                         </h3>
                         <button 
                             onClick={onClose}

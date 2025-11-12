@@ -8,9 +8,10 @@ import { db } from './firebase-config.js'; // <-- 引入 Firebase
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, orderBy, serverTimestamp } from "firebase/firestore";
 import { calculateUnitPrice, calculateFinalPrice, formatUnitPrice } from './utils/priceCalculations';
-import OcrQueuePage from './OcrQueuePage';
+import { detectPriceAnomaly } from './utils/anomalyDetection';
+
 import { showUserFriendlyError, handleFirestoreSaveError } from './utils/errorHandler'; // 導入錯誤處理工具
-import { v4 as uuidv4 } from 'uuid'; // 引入 uuid 函式庫來生成本地 ID
+ // 引入 uuid 函式庫來生成本地 ID
 
 // ----------------------------------------------------------------------------
 // 1. 核心設定與工具函數 (Core Setup & Utilities)
@@ -275,9 +276,9 @@ function SaveResultToast({ result, onClose }) {
 // ----------------------------------------------------------------------------
 // 5. 全畫面提示窗 (Full Screen Alert)
 // ----------------------------------------------------------------------------
-function FullScreenAlert({ message, isVisible, duration, onClose }) {
+function FullScreenAlert({ message, isVisible, duration, onClose, showButtons, onConfirm, onCancel }) {
     useEffect(() => {
-        if (isVisible) {
+        if (isVisible && duration > 0) {
             const timer = setTimeout(() => {
                 onClose();
             }, duration);
@@ -289,18 +290,43 @@ function FullScreenAlert({ message, isVisible, duration, onClose }) {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75">
-            <div className="bg-white p-8 rounded-xl shadow-2xl max-w-md w-full mx-4 text-center animate-pulse">
+            <div className="bg-white p-8 rounded-xl shadow-2xl max-w-md w-full mx-4 text-center">
                 <div className="text-5xl mb-4">⚠️</div>
                 <h2 className="text-2xl font-bold text-gray-800 mb-4">{message}</h2>
-                <div className="w-full bg-gray-200 rounded-full h-2.5">
-                    <div 
-                        className="bg-blue-600 h-2.5 rounded-full" 
-                        style={{ 
-                            animation: `progress ${duration}ms linear forwards`,
-                            width: '100%'
-                        }}
-                    ></div>
-                </div>
+                
+                {showButtons ? (
+                    <div className="flex space-x-3 justify-center">
+                        <button 
+                            onClick={onConfirm}
+                            className="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-medium"
+                        >
+                            是的
+                        </button>
+                        <button 
+                            onClick={onCancel}
+                            className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-medium"
+                        >
+                            不是
+                        </button>
+                    </div>
+                ) : duration === 0 ? (
+                    <button 
+                        onClick={onClose}
+                        className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium"
+                    >
+                        確定
+                    </button>
+                ) : (
+                    <div className="w-full bg-gray-200 rounded-full h-2.5">
+                        <div 
+                            className="bg-blue-600 h-2.5 rounded-full" 
+                            style={{ 
+                                animation: `progress ${duration}ms linear forwards`,
+                                width: '100%'
+                            }}
+                        ></div>
+                    </div>
+                )}
             </div>
             
             <style>{`
@@ -345,13 +371,18 @@ function App() {
     const [isLoading, setIsLoading] = useState(false);
     const [lookupStatus, setLookupStatus] = useState('ready');
     
+    // 商店會話狀態
+    const [currentStoreSession, setCurrentStoreSession] = useState(() => {
+        const saved = localStorage.getItem('currentStoreSession');
+        return saved ? JSON.parse(saved) : null;
+    });
+    const [showStoreSessionPrompt, setShowStoreSessionPrompt] = useState(false);
+    
     // Modal and Page 狀態
     const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
     const [isCaptureModalOpen, setIsCaptureModalOpen] = useState(false);
     const [isStoreSelectorOpen, setIsStoreSelectorOpen] = useState(false);
-    const [isOcrQueueStoreSelectorOpen, setIsOcrQueueStoreSelectorOpen] = useState(false); // 新增狀態
-    const [isSettingsOpen, setIsSettingsOpen] = useState(false); // 新增狀態
-    const [editingOcrCard, setEditingOcrCard] = useState(null); // 新增狀態
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     
     // 新增 useEffect 來自動清除狀態消息
     useEffect(() => {
@@ -364,224 +395,146 @@ function App() {
         return () => clearTimeout(timer);
     }, [statusMessage]);
     
+    // 商店會話管理
+    const checkStoreSession = useCallback(() => {
+        const now = Date.now();
+        const lastAppOpen = localStorage.getItem('lastAppOpenTime');
+        const lastOpenTime = lastAppOpen ? parseInt(lastAppOpen) : 0;
+        
+        // 更新最後開啟時間
+        localStorage.setItem('lastAppOpenTime', now.toString());
+        
+        // 如果是5分鐘內重新開啟
+        if (now - lastOpenTime < 5 * 60 * 1000 && currentStoreSession) {
+            // 詢問是否為同一商店
+            setFullScreenAlert({
+                isVisible: true,
+                message: `您是否仍在 ${currentStoreSession.storeName} 購物？`,
+                duration: 0, // 不自動關閉
+                showButtons: true,
+                onConfirm: () => {
+                    setFullScreenAlert({ isVisible: false, message: '', duration: 0 });
+                    setStoreName(currentStoreSession.storeName);
+                },
+                onCancel: () => {
+                    setFullScreenAlert({ isVisible: false, message: '', duration: 0 });
+                    setShowStoreSessionPrompt(true);
+                }
+            });
+        } else {
+            // 詢問當前商店
+            setShowStoreSessionPrompt(true);
+        }
+    }, [currentStoreSession]);
+
+    const handleStoreSessionSelect = useCallback((selectedStore) => {
+        const session = {
+            storeName: selectedStore,
+            startTime: Date.now(),
+            sessionId: Date.now().toString()
+        };
+        setCurrentStoreSession(session);
+        localStorage.setItem('currentStoreSession', JSON.stringify(session));
+        setStoreName(selectedStore);
+        setShowStoreSessionPrompt(false);
+    }, []);
+
     // 新增函數：處理數據刷新
     const handleDataRefresh = useCallback((key) => {
-        // 如果清除的是 pendingOcrCards，需要更新狀態
-        if (key === 'pendingOcrCards' || key === 'ALL') {
-            const savedCards = localStorage.getItem('pendingOcrCards');
-            setPendingOcrCards(savedCards ? JSON.parse(savedCards) : []);
-        }
         // 可以在這裡添加其他需要刷新的狀態
     }, []);
 
-    const [currentPage, setCurrentPage] = useState('main'); // 'main', 'allRecords', 'ocrQueue'
-    const [ocrResult, setOcrResult] = useState(null);
-    const [capturedImage, setCapturedImage] = useState(null); // 新增的狀態
-    
-    // 新增狀態：待辨識序列
-    const [pendingOcrCards, setPendingOcrCards] = useState(() => {
-        // 從 localStorage 恢復待辨識卡片
-        const savedCards = localStorage.getItem('pendingOcrCards');
-        return savedCards ? JSON.parse(savedCards) : [];
-    });
-    
-    // 新增狀態：跟踪是否已從 Firebase 加載數據
-    const [isFirebaseDataLoaded, setIsFirebaseDataLoaded] = useState(false);
-    
-    // 新增狀態：跟踪上次同步的數據哈希值
-    const [lastSyncedDataHash, setLastSyncedDataHash] = useState('');
-    
-    // 新增狀態：跟踪上次同步時間
-    const [lastSyncTime, setLastSyncTime] = useState(0);
-    
-    // 計算數據哈希值的函數
-    const calculateDataHash = useCallback((data) => {
-        // 將數據轉換為字符串並計算簡單哈希
-        const str = JSON.stringify(data, Object.keys(data).sort());
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            const char = str.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash; // 轉換為32位整數
-        }
-        return hash.toString();
-    }, []);
-    
-    // 新增函數：同步 pendingOcrCards 到 Firebase
-    const syncPendingOcrCardsToFirebase = useCallback(async (cards) => {
-        // 只有在用戶已認證時才同步（不需要等待 Firebase 數據加載完成）
-        if (!isAuthReady || !userId) {
-            console.log("Firebase 尚未準備好或無用戶 ID，跳過雲端同步。");
-            return;
-        }
-        
-        // 計算當前數據的哈希值
-        const currentDataHash = calculateDataHash(cards);
-        
-        // 檢查是否在短時間內重複同步（頻率限制）
-        const now = Date.now();
-        const timeSinceLastSync = now - lastSyncTime;
-        if (timeSinceLastSync < 5000) { // 5秒內不重複同步
-            console.log("同步頻率過高，跳過本次同步。");
-            return;
-        }
-        
-        // 如果數據沒有變化，則跳過同步
-        if (currentDataHash === lastSyncedDataHash) {
-            console.log("數據未發生變化，跳過雲端同步。");
-            return;
-        }
-
+    // GPS 定位功能
+    const attemptGPSLocation = useCallback(async () => {
         try {
-            // 使用用戶 ID 作為 Document ID，在 ocrQueues Collection 中
-            const queueRef = doc(db, "ocrQueues", userId);
-
-            // 儲存整個卡片陣列 (如果陣列大小在 Firestore 限制內)
-            await setDoc(queueRef, {
-                cards: cards, // 整個 pendingOcrCards 陣列
-                lastUpdated: serverTimestamp(), // 記錄最後更新時間
-                userId: userId // 保存用戶 ID
-            }, { merge: true });
-
-            console.log("待辨識序列已成功同步至 Firebase 雲端。");
-            
-            // 更新最後同步的數據哈希值和時間
-            setLastSyncedDataHash(currentDataHash);
-            setLastSyncTime(now);
-            
-            // 更新卡片的同步狀態為成功（只更新那些狀態不是成功的卡片）
-            // 只有當 cards 不為空數組時才更新狀態
-            if (cards.length > 0) {
-                const updatedCards = cards.map(card => ({
-                    ...card,
-                    syncStatus: 'success'
-                }));
-                
-                // 只有當有卡片狀態需要更新時才更新狀態
-                const needsUpdate = cards.some(card => card.syncStatus !== 'success');
-                if (needsUpdate) {
-                    setPendingOcrCards(updatedCards);
-                }
+            if (!navigator.geolocation) {
+                console.log("瀏覽器不支援 GPS 定位");
+                return null;
             }
-        } catch (error) {
-            console.error("Firebase 雲端同步失敗:", error);
-            // 不再顯示錯誤給用戶，因為這可能會干擾用戶體驗
-            
-            // 更新卡片的同步狀態為錯誤（只更新那些狀態不是錯誤的卡片）
-            // 只有當 cards 不為空數組時才更新狀態
-            if (cards.length > 0) {
-                const updatedCards = cards.map(card => ({
-                    ...card,
-                    syncStatus: 'error'
-                }));
-                
-                // 只有當有卡片狀態需要更新時才更新狀態
-                const needsUpdate = cards.some(card => card.syncStatus !== 'error');
-                if (needsUpdate) {
-                    setPendingOcrCards(updatedCards);
-                }
-            }
-        }
-    }, [isAuthReady, userId, lastSyncedDataHash, lastSyncTime, calculateDataHash]);
-    
-    // 添加 useEffect 來保存 pendingOcrCards 到 localStorage 和雲端
-    useEffect(() => {
-        // 1. 本地持久化
-        localStorage.setItem('pendingOcrCards', JSON.stringify(pendingOcrCards));
-        
-        // 2. 雲端同步（不需要等待 Firebase 數據加載完成）
-        // 總是觸發同步，即使是空數組也要同步以確保雲端數據與本地一致
-        syncPendingOcrCardsToFirebase(pendingOcrCards);
-    }, [pendingOcrCards, syncPendingOcrCardsToFirebase]);
-    
-    // 新增 useEffect：從 Firebase 載入數據
-    useEffect(() => {
-        if (isAuthReady && userId && !isFirebaseDataLoaded) {
-            const loadCards = async () => {
-                try {
-                    const queueRef = doc(db, "ocrQueues", userId);
-                    const docSnap = await getDoc(queueRef);
 
-                    // 獲取本地數據
-                    const savedLocalCards = localStorage.getItem('pendingOcrCards');
-                    let localCards = [];
-                    if (savedLocalCards) {
-                         try {
-                             localCards = JSON.parse(savedLocalCards);
-                         } catch (parseError) {
-                             console.error("解析本地數據失敗:", parseError);
-                             localStorage.removeItem('pendingOcrCards'); // 清除損壞的數據
-                         }
+            const position = await new Promise((resolve, reject) => {
+                navigator.geolocation.getCurrentPosition(
+                    resolve,
+                    reject,
+                    {
+                        enableHighAccuracy: false,
+                        timeout: 3000, // 3秒超時
+                        maximumAge: 300000 // 5分鐘內的快取位置可接受
                     }
-                    
-                    // 獲取本地最後更新時間
-                    const localLastUpdated = localStorage.getItem('pendingOcrCardsLastUpdated');
-                    const localLastUpdatedDate = localLastUpdated ? new Date(localLastUpdated) : new Date(0);
+                );
+            });
 
-                    if (docSnap.exists() && Array.isArray(docSnap.data().cards)) {
-                        const firebaseCards = docSnap.data().cards;
-                        const firebaseLastUpdated = docSnap.data().lastUpdated?.toDate?.() || new Date(0);
-                        
-                        // 比較本地和雲端數據的時間戳
-                        // 如果雲端數據比本地新，則使用雲端數據
-                        if (firebaseLastUpdated > localLastUpdatedDate) {
-                            setPendingOcrCards(firebaseCards);
-                            localStorage.setItem('pendingOcrCards', JSON.stringify(firebaseCards)); // 用雲端數據覆蓋本地
-                            localStorage.setItem('pendingOcrCardsLastUpdated', new Date().toISOString()); // 更新時間戳
-                            console.log("已從 Firebase 恢復待辨識序列。");
-                        } 
-                        // 如果本地數據比雲端新，則上傳本地數據到雲端
-                        else if (firebaseLastUpdated < localLastUpdatedDate) { // 移除了 localCards.length > 0 的條件
-                            // 觸發一次同步到雲端
-                            syncPendingOcrCardsToFirebase(localCards);
-                            console.log("本地數據較新，已同步到 Firebase。");
-                        }
-                        // 如果數據數量不同，合併數據
-                        else if (firebaseCards.length !== localCards.length) {
-                            // 創建一個基於 ID 的映射來避免重複
-                            const localCardMap = new Map(localCards.map(card => [card.id, card]));
-                            const firebaseCardMap = new Map(firebaseCards.map(card => [card.id, card]));
-                            
-                            // 合併兩個集合
-                            const mergedCards = [...localCards];
-                            for (const [id, firebaseCard] of firebaseCardMap) {
-                                if (!localCardMap.has(id)) {
-                                    mergedCards.push(firebaseCard);
-                                }
-                            }
-                            
-                            // 按時間戳排序
-                            mergedCards.sort((a, b) => a.timestamp - b.timestamp);
-                            
-                            setPendingOcrCards(mergedCards);
-                            localStorage.setItem('pendingOcrCards', JSON.stringify(mergedCards)); // 用合併後的數據覆蓋本地
-                            localStorage.setItem('pendingOcrCardsLastUpdated', new Date().toISOString()); // 更新時間戳
-                            console.log("已從 Firebase 合併待辨識序列。");
-                        }
-                        // 如果數據相同，則不需要做任何事情
-                        else {
-                            console.log("本地和雲端數據一致，無需同步。");
-                        }
-                    } else {
-                        // 如果雲端沒有數據，確保本地數據也是空的
-                        // 這會處理用戶刪除所有卡片後的情況
-                        setPendingOcrCards([]);
-                        localStorage.setItem('pendingOcrCards', JSON.stringify([]));
-                        localStorage.setItem('pendingOcrCardsLastUpdated', new Date().toISOString());
-                        console.log("雲端沒有數據，已清除本地待辨識序列。");
-                    }
-                    
-                    // 標記 Firebase 數據已加載
-                    setIsFirebaseDataLoaded(true);
-                } catch (error) {
-                    console.error("從 Firebase 載入序列失敗:", error);
-                    // 即使加載失敗，也標記為已加載以允許本地操作
-                    setIsFirebaseDataLoaded(true);
-                }
+            // 這裡可以加入反向地理編碼來獲取縣市信息
+            // 為了簡化，我們只記錄經緯度
+            const location = {
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+                accuracy: position.coords.accuracy,
+                method: 'GPS',
+                timestamp: Date.now()
             };
-            loadCards();
+
+            setLocationData(location);
+            console.log("GPS 定位成功:", location);
+            return location;
+        } catch (error) {
+            console.log("GPS 定位失敗，靜默跳過:", error.message);
+            return null;
         }
-    }, [isAuthReady, userId, setPendingOcrCards, syncPendingOcrCardsToFirebase, isFirebaseDataLoaded]);
+    }, []);
+
+    // 載入今日掃描記錄
+    const loadTodayScans = useCallback(async () => {
+        if (!isAuthReady || !userId) return;
+        
+        try {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            
+            const recordsQuery = query(
+                collection(db, "priceRecords"),
+                where("recordedBy", "==", userId),
+                where("timestamp", ">=", today),
+                where("timestamp", "<", tomorrow),
+                orderBy("timestamp", "desc")
+            );
+            
+            const querySnapshot = await getDocs(recordsQuery);
+            const records = querySnapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+                timestamp: doc.data().timestamp?.toDate()
+            }));
+            
+            setTodayScans(records);
+        } catch (error) {
+            console.error("載入今日掃描記錄失敗:", error);
+        }
+    }, [isAuthReady, userId]);
+
+    // 應用啟動時檢查商店會話和GPS定位
+    useEffect(() => {
+        if (isAuthReady) {
+            checkStoreSession();
+            loadTodayScans();
+            // 靜默嘗試GPS定位
+            attemptGPSLocation();
+        }
+    }, [isAuthReady, checkStoreSession, loadTodayScans, attemptGPSLocation]);
+
+    const [currentPage, setCurrentPage] = useState('main'); // 'main', 'allRecords'
+    const [ocrResult, setOcrResult] = useState(null);
+    const [capturedImage, setCapturedImage] = useState(null);
+    
+    // 今日掃描記錄狀態
+    const [todayScans, setTodayScans] = useState([]);
+    
+    // GPS 定位狀態
+    const [locationData, setLocationData] = useState(null);
+    
+    
     
     useEffect(() => {
         // 使用新的價格計算函數來確定最終價格
@@ -705,106 +658,9 @@ function App() {
         }
     }, [isAuthReady, userId, setProductName, setLookupStatus, setProductHistory, setStatusMessage]);
 
-    // 新增函數：處理 OCR 隊列的商店選擇
-    const handleOcrQueueStoreSelect = useCallback((card) => {
-        setEditingOcrCard(card);
-        setIsOcrQueueStoreSelectorOpen(true);
-    }, [setEditingOcrCard, setIsOcrQueueStoreSelectorOpen]);
+    
 
-    // 新增函數：儲存 OCR 卡片到 Firebase（獨立函數，可在多處使用）
-    const saveOcrCardToFirebase = useCallback(async (card, storeNameOverride) => {
-        // 生成產品 ID
-        const numericalID = generateProductId(card.scannedBarcode, card.productName, storeNameOverride || card.storeName);
-        
-        // 使用新的價格計算函數來確定最終價格
-        const finalPrice = calculateFinalPrice(card.extractedPrice, card.specialPrice);
-        const priceValue = parseFloat(finalPrice);
-        
-        // 使用 calculateUnitPrice 函數計算單價
-        const calculatedUnitPrice = calculateUnitPrice(priceValue, card.quantity, card.unitType);
-        
-        // 儲存產品資訊
-        const productRef = doc(db, "products", numericalID.toString());
-        const productSnap = await getDoc(productRef);
-        if (!productSnap.exists()) {
-            await setDoc(productRef, {
-                numericalID,
-                barcodeData: card.scannedBarcode,
-                productName: card.productName,
-                createdAt: serverTimestamp(),
-                lastUpdatedBy: "ocr-queue", // 標記為來自 OCR 隊列
-            });
-        }
-        
-        // 儲存價格記錄
-        const priceRecord = {
-            numericalID,
-            productName: card.productName,
-            storeName: storeNameOverride || card.storeName,
-            price: priceValue, // 總價
-            quantity: parseFloat(card.quantity),
-            unitType: card.unitType,
-            unitPrice: calculatedUnitPrice, // 單價
-            discountDetails: card.discountDetails || '',
-            timestamp: serverTimestamp(),
-            recordedBy: "ocr-queue", // 標記為來自 OCR 隊列
-            // 保存原價和特價信息（如果有的話）
-            originalPrice: card.originalPrice ? parseFloat(card.originalPrice) : null,
-            specialPrice: card.specialPrice ? parseFloat(card.specialPrice) : null
-        };
-        
-        await addDoc(collection(db, "priceRecords"), priceRecord);
-    }, []);
-
-    // 新增函數：處理 OCR 隊列的商店選擇確認
-    const handleOcrQueueStoreSelectConfirm = useCallback((selectedStore) => {
-        if (editingOcrCard) {
-            // 更新待辨識卡片的商店名稱
-            const updatedCards = pendingOcrCards.map(card => 
-                card.id === editingOcrCard.id ? { ...card, storeName: selectedStore } : card
-            );
-            setPendingOcrCards(updatedCards);
-            
-            // 直接儲存卡片到 Firebase
-            saveOcrCardToFirebase(editingOcrCard, selectedStore)
-                .then(() => {
-                    // 儲存成功後從待辨識序列中移除
-                    setPendingOcrCards(prevCards => prevCards.filter(card => card.id !== editingOcrCard.id));
-                    
-                    // 儲存後更新 localStorage 使用量
-                    setTimeout(() => {
-                        // 這裡我們需要訪問 OcrQueuePage 中的 getLocalStorageUsage 函數
-                        // 由於無法直接訪問，我們可以簡單地重新計算
-                        // 移除未使用的 used 和 quota 變數
-                        // let total = 0;
-                        // for (let key in localStorage) {
-                        //     if (localStorage.hasOwnProperty(key)) {
-                        //         total += (localStorage[key].length + key.length) * 2;
-                        //     }
-                        // }
-                        // const used = (total / 1024).toFixed(2);
-                        // const quota = 5120;
-                        // 移除未使用的 percentage 變數
-                        // const percentage = ((used / quota) * 100).toFixed(2);
-                        
-                        // 注意：我們無法直接更新 OcrQueuePage 的狀態，但可以在下次打開時更新
-                    }, 100);
-                })
-                .catch((error) => {
-                    console.error("儲存失敗:", error);
-                    const userMessage = handleFirestoreSaveError(error, "儲存待辨識卡片");
-                    showUserFriendlyError(userMessage);
-                });
-        }
-        setIsOcrQueueStoreSelectorOpen(false);
-        setEditingOcrCard(null);
-    }, [editingOcrCard, pendingOcrCards, setPendingOcrCards, setIsOcrQueueStoreSelectorOpen, setEditingOcrCard, saveOcrCardToFirebase]);
-
-    // 新增函數：處理 OCR 隊列的商店選擇器關閉
-    const handleOcrQueueStoreSelectorClose = useCallback(() => {
-        setIsOcrQueueStoreSelectorOpen(false);
-        setEditingOcrCard(null);
-    }, [setIsOcrQueueStoreSelectorOpen, setEditingOcrCard]);
+    
 
     // 正確地提前定義 performSaveAndCompare 函數（必須在 saveAndComparePrice 之前定義）
     const performSaveAndCompare = useCallback(async (selectedStore) => {
@@ -856,8 +712,26 @@ function App() {
                 recordedBy: userId,
                 // 保存原價和特價信息（如果有的話）
                 originalPrice: ocrResult?.originalPrice ? parseFloat(ocrResult.originalPrice) : null,
-                specialPrice: ocrResult?.specialPrice ? parseFloat(ocrResult.specialPrice) : null
+                specialPrice: ocrResult?.specialPrice ? parseFloat(ocrResult.specialPrice) : null,
+                // 添加地理位置信息（如果有的話）
+                locationData: locationData || null
             };
+
+            // 檢測價格異常
+            const historicalPrices = productHistory.map(record => record.unitPrice).filter(price => price && !isNaN(price));
+            const anomalyResult = detectPriceAnomaly(calculatedUnitPrice, historicalPrices);
+            
+            // 如果檢測到異常，添加標記
+            if (anomalyResult.isAnomalous) {
+                priceRecord.anomalyFlag = {
+                    flagged: true,
+                    confidence: anomalyResult.confidence,
+                    reason: anomalyResult.reason,
+                    deviation: anomalyResult.deviation,
+                    flaggedAt: serverTimestamp()
+                };
+                console.log("檢測到異常價格:", anomalyResult);
+            }
 
             // 儲存價格記錄
             const priceRecordDocRef = await addDoc(collection(db, "priceRecords"), priceRecord);
@@ -895,6 +769,12 @@ function App() {
                 bestStore = finalStoreName;
                 toastStatus = 'success';
                 toastMessage = '恭喜！這是目前紀錄中的最低單價！';
+                
+                // 如果是異常價格但又是最低價，添加警告
+                if (anomalyResult.isAnomalous) {
+                    toastMessage += ` (注意：此價格偏離平均值${(anomalyResult.deviation * 100).toFixed(1)}%，請確認是否正確)`;
+                    toastStatus = 'warning';
+                }
             } else {
                 isBest = false;
                 bestPrice = productData.bestUnitPrice;
@@ -914,11 +794,19 @@ function App() {
                 
                 toastStatus = 'warning';
                 toastMessage = `非最低單價。歷史最低單價為 $${formatUnitPrice(productData.bestUnitPrice)} (${bestStore})`;
+                
+                // 如果是異常價格，添加額外警告
+                if (anomalyResult.isAnomalous) {
+                    toastMessage += ` (注意：此價格偏離平均值${(anomalyResult.deviation * 100).toFixed(1)}%，已標記為異常)`;
+                }
             }
 
             setComparisonResult({ isBest, bestPrice, bestStore, message: toastMessage });
             // 儲存成功時顯示提示訊息
             setSaveResultToast({ status: toastStatus, message: toastMessage, productName: productName });
+            
+            // 重新載入今日掃描記錄
+            loadTodayScans();
             
             lookupProduct(barcode, productName, finalStoreName);
 
@@ -929,7 +817,7 @@ function App() {
         } finally {
             setIsLoading(false);
         }
-    }, [userId, barcode, productName, currentPrice, discountDetails, storeName, lookupProduct, quantity, unitType, setSaveResultToast, setComparisonResult, setIsLoading, setIsStoreSelectorOpen, ocrResult]);
+    }, [userId, barcode, productName, currentPrice, discountDetails, storeName, lookupProduct, quantity, unitType, setSaveResultToast, setComparisonResult, setIsLoading, setIsStoreSelectorOpen, ocrResult, loadTodayScans, locationData, productHistory]);
 
     // 正確地提前定義 saveAndComparePrice 函數
     const saveAndComparePrice = useCallback(async (selectedStore) => {
@@ -955,7 +843,7 @@ function App() {
         performSaveAndCompare(selectedStore);
     }, [isAuthReady, performSaveAndCompare]);
     
-    const handleAiCaptureSuccess = useCallback((result) => {
+    const handleAiCaptureSuccess = useCallback(async (result) => {
         const { scannedBarcode, productName, extractedPrice, storeName, discountDetails, quantity, unitType, specialPrice, capturedImage: receivedImage } = result;
         setOcrResult(result);
         
@@ -970,7 +858,7 @@ function App() {
         if (!newBarcode) {
             setStatusMessage("AI 未能識別條碼，請手動輸入或確保條碼清晰！");
         } else {
-            setStatusMessage(`AI 分析成功！`);
+            setStatusMessage(`AI 分析成功！正在自動儲存...`);
         }
 
         setProductName(productName || '');
@@ -990,79 +878,28 @@ function App() {
         } else {
             setLookupStatus('new');
         }
-    }, [setBarcode, setProductName, setCurrentPrice, setStoreName, setDiscountDetails, setOcrResult, setStatusMessage, setLookupStatus, setQuantity, setUnitType, setCapturedImage]);
 
-    // 定義一個新的函式來處理 Firebase 備份
-    const backupOcrCardToFirebase = useCallback(async (cardData) => {
-        // 檢查 Firebase 是否準備好
-        if (!isAuthReady || !userId) {
-            // 由於功能要求是自動備份，若服務未準備好，則將其視為 pending 或 error (可選)
-            console.warn("Firebase 服務尚未準備好，跳過備份。");
-            // 由於此專案似乎有 MVP 階段屏蔽 Firebase 的歷史需求，
-            // 這裡可以選擇將狀態設為 'error' 或保留 'pending'。
-            // 為避免影響核心功能，建議在此處直接返回，讓卡片保持 'pending' 狀態。
-            return;
+        // 實現掃描即存功能 - 如果有足夠的資料就自動儲存
+        if (newBarcode && productName && finalPrice && quantity && storeName) {
+            try {
+                setIsLoading(true);
+                await performSaveAndCompare(storeName);
+                setStatusMessage("掃描即存成功！");
+                // 關閉拍攝模態框
+                setIsCaptureModalOpen(false);
+                stopCameraStream();
+            } catch (error) {
+                console.error("自動儲存失敗:", error);
+                setStatusMessage("自動儲存失敗，請手動確認資料後儲存");
+            } finally {
+                setIsLoading(false);
+            }
+        } else {
+            setStatusMessage("資料不完整，請手動補充後儲存");
         }
+    }, [setBarcode, setProductName, setCurrentPrice, setStoreName, setDiscountDetails, setOcrResult, setStatusMessage, setLookupStatus, setQuantity, setUnitType, setCapturedImage, performSaveAndCompare, setIsLoading, setIsCaptureModalOpen, stopCameraStream]);
 
-        const cardToSave = {
-            ...cardData,
-            userId: userId, // 儲存用戶 ID
-            timestamp: serverTimestamp(), // 使用 Firebase 服務器時間戳
-            // 移除本地 ID 和同步狀態，因為這些只用於本地 UI
-            id: undefined, 
-            syncStatus: undefined
-        };
-
-        try {
-            // 將卡片數據儲存到 pendingOcrCards 集合
-            const docRef = await addDoc(collection(db, "pendingOcrCards"), cardToSave);
-            
-            // 成功後更新本地狀態
-            setPendingOcrCards(prevCards => 
-                prevCards.map(c => 
-                    c.id === cardData.id ? { ...c, syncStatus: 'success', fbDocId: docRef.id } : c
-                )
-            );
-
-        } catch (error) {
-            console.error("Firebase 待辨識卡片備份失敗:", error);
-            handleFirestoreSaveError(error, "備份待辨識卡片"); // 使用錯誤處理機制
-            
-            // 失敗後更新本地狀態
-            setPendingOcrCards(prevCards => 
-                prevCards.map(c => 
-                    c.id === cardData.id ? { ...c, syncStatus: 'error' } : c
-                )
-            );
-        }
-    }, [isAuthReady, userId, setPendingOcrCards]);
-
-    // 新增函數：將辨識結果加入待確認序列
-    const handleQueueNextCapture = useCallback((result) => {
-        // 1. 建立具有初始同步狀態的新卡片物件
-        const newCard = {
-            ...result,
-            id: uuidv4(), // 確保本地狀態有一個唯一 ID
-            timestamp: Date.now(), // 本地時間戳 (用於排序/顯示)
-            syncStatus: 'pending', // 初始狀態設為處理中
-        };
-        
-        // 2. 更新本地狀態 (立即顯示卡片)
-        setPendingOcrCards(prev => [...prev, newCard]);
-        
-        // 3. 更新本地時間戳
-        localStorage.setItem('pendingOcrCardsLastUpdated', new Date().toISOString());
-
-        // 4. 觸發 Firebase 備份
-        backupOcrCardToFirebase(newCard); 
-        
-        setStatusMessage(`已將辨識結果加入待確認序列！`);
-    }, [setPendingOcrCards, backupOcrCardToFirebase]);
-
-    // 新增函數：移除待確認的辨識卡片
-    const handleRemovePendingOcrCard = useCallback((cardId) => {
-        setPendingOcrCards(prev => prev.filter(item => item.id !== cardId));
-    }, []);
+    
 
     const handleStoreSelect = useCallback((selectedStore) => {
         setStoreName(selectedStore);
@@ -1076,44 +913,6 @@ function App() {
     }, [stopCameraStream]);
 
     const handleNewScanClick = async () => {
-        // 檢查待辨識卡片數量是否達到限制
-        const savedCards = localStorage.getItem('pendingOcrCards');
-        const pendingCards = savedCards ? JSON.parse(savedCards) : [];
-        
-        // 如果卡片數量達到11張，禁止擷取
-        if (pendingCards.length >= 11) {
-            setFullScreenAlert({
-                isVisible: true,
-                message: "容量已滿，請先確認卡片",
-                duration: 3000
-            });
-            return;
-        }
-        
-        // 如果卡片數量達到9張，顯示警告
-        if (pendingCards.length >= 9) {
-            setFullScreenAlert({
-                isVisible: true,
-                message: "容量快滿，請儘快確認卡片",
-                duration: 2000
-            });
-            
-            // 2秒後自動進入AI視覺擷取功能
-            setTimeout(async () => {
-                setFullScreenAlert({ isVisible: false, message: '', duration: 0 });
-                clearForm();
-                const stream = await startCameraStream();
-                if (stream) {
-                    setIsCaptureModalOpen(true);
-                } else {
-                    // 如果無法啟動相機，顯示錯誤訊息
-                    setStatusMessage("無法啟動相機，請檢查權限設置");
-                }
-            }, 2000);
-            
-            return;
-        }
-        
         clearForm();
         const stream = await startCameraStream();
         if (stream) {
@@ -1128,7 +927,7 @@ function App() {
     const themeText = currentTheme.text;
     const themeLight = currentTheme.light;
     const themeBorder = currentTheme.border;
-    const themeHover = currentTheme.hover; // 添加這一行來定義 themeHover
+    
 
     const productNamePlaceholder = useMemo(() => {
         switch(lookupStatus) {
@@ -1155,6 +954,9 @@ function App() {
                 isVisible={fullScreenAlert.isVisible}
                 duration={fullScreenAlert.duration}
                 onClose={() => setFullScreenAlert({ isVisible: false, message: '', duration: 0 })}
+                showButtons={fullScreenAlert.showButtons}
+                onConfirm={fullScreenAlert.onConfirm}
+                onCancel={fullScreenAlert.onCancel}
             />
             
             {/* 新增 SettingsPage 的渲染 */}
@@ -1172,22 +974,8 @@ function App() {
                     <header className="flex justify-between items-center mb-6 border-b pb-4">
                         <h1 className={`text-3xl font-extrabold ${themeText} flex items-center`}><Barcode className="w-8 h-8 mr-2" />條碼比價神器 (Cloud)</h1>
                         <div className="flex items-center space-x-3">
-                            {/* 新增待辨識的按鈕 */}
-                            <button 
-                                onClick={() => setCurrentPage('ocrQueue')}
-                                className={`relative p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`}
-                                title={`待辨識 (${pendingOcrCards.length})`}
-                            >
-                                <Zap className="w-5 h-5" />
-                                {pendingOcrCards.length > 0 && (
-                                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                                        {pendingOcrCards.length}
-                                    </span>
-                                )}
-                            </button>
                             <button onClick={() => setCurrentPage('allRecords')} className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`} title="查看所有記錄"><Database className="w-5 h-5" /></button>
                             <button onClick={() => setIsThemeModalOpen(true)} className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`} title="設定介面主題"><PaintBucket className="w-5 h-5" /></button>
-                            {/* 新增設定按鈕 */}
                             <button onClick={() => setIsSettingsOpen(true)} className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`} title="設定"><SettingsIcon className="w-5 h-5" /></button>
                             <p className="text-sm text-gray-500 hidden sm:block">User: {userId.slice(0, 8)}...</p>
                         </div>
@@ -1314,60 +1102,59 @@ function App() {
                         </div>
                     </div>
 
-                    {(lookupStatus === 'found' || lookupStatus === 'new') && <PriceHistoryDisplay historyRecords={productHistory} theme={currentTheme} />}
-                    
-                    {/* 在主介面添加一個快捷處理待辨識卡片的按鈕 */}
-                    {pendingOcrCards.length > 0 && (
-                        <div className="mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                            <div className="flex justify-between items-center">
-                                <div>
-                                    <h3 className="font-bold text-yellow-800">有待辨識的項目</h3>
-                                    <p className="text-sm text-yellow-600">您有 {pendingOcrCards.length} 個待辨識的項目等待處理</p>
-                                </div>
-                                <button 
-                                    onClick={() => {
-                                        // 處理第一個待辨識的卡片
-                                        const firstCard = pendingOcrCards[0];
-                                        
-                                        // 設置表單數據
-                                        setOcrResult(firstCard);
-                                        setCapturedImage(firstCard.capturedImage);
-                                        setBarcode(firstCard.scannedBarcode || '');
-                                        setProductName(firstCard.productName || '');
-                                        setCurrentPrice(firstCard.extractedPrice || '');
-                                        setStoreName(firstCard.storeName || '');
-                                        setDiscountDetails(firstCard.discountDetails || '');
-                                        setQuantity(firstCard.quantity || '');
-                                        setUnitType(firstCard.unitType || 'pcs');
-                                        
-                                        // 計算單價
-                                        const priceValue = parseFloat(firstCard.extractedPrice);
-                                        const qty = parseFloat(firstCard.quantity);
-                                        if (!isNaN(priceValue) && !isNaN(qty) && qty > 0) {
-                                            const calculatedUnitPrice = calculateUnitPrice(priceValue, qty, firstCard.unitType);
-                                            setUnitPrice(calculatedUnitPrice);
-                                        }
-                                        
-                                        // 更新狀態
-                                        if (firstCard.productName && firstCard.scannedBarcode) {
-                                            setLookupStatus('found');
-                                        } else {
-                                            setLookupStatus('new');
-                                        }
-                                        
-                                        // 從待辨識序列中移除該卡片
-                                        setPendingOcrCards(prev => prev.filter(item => item.id !== firstCard.id));
-                                        
-                                        // 顯示提示訊息
-                                        setStatusMessage(`已載入待辨識項目: ${firstCard.productName || '未命名產品'}`);
-                                    }}
-                                    className={`px-4 py-2 rounded-lg text-white font-medium ${themePrimary} ${themeHover}`}
-                                >
-                                    處理第一個待辨識項目
-                                </button>
+                    {/* 今日掃描摘要 */}
+                    {todayScans.length > 0 && (
+                        <div className="mt-8">
+                            <h2 className={`text-xl font-semibold ${themeText} mb-4 flex items-center`}>
+                                <Zap className="w-5 h-5 mr-2" />
+                                今日掃描 ({todayScans.length} 筆)
+                            </h2>
+                            <div className="space-y-3">
+                                {todayScans.slice(0, 5).map((scan, index) => (
+                                    <div key={scan.id} className="bg-white rounded-lg p-4 shadow-md border-l-4 border-blue-500">
+                                        <div className="flex justify-between items-start">
+                                            <div className="flex-1">
+                                                <h3 className="font-medium text-gray-800">{scan.productName}</h3>
+                                                <p className="text-sm text-gray-600">{scan.storeName} • ${scan.price}</p>
+                                                <p className="text-xs text-gray-500">
+                                                    {scan.timestamp?.toLocaleTimeString('zh-TW', { 
+                                                        hour: '2-digit', 
+                                                        minute: '2-digit' 
+                                                    })}
+                                                </p>
+                                            </div>
+                                            <div className="text-right">
+                                                {scan.unitPrice && (
+                                                    <p className="text-sm font-medium text-gray-700">
+                                                        ${formatUnitPrice(scan.unitPrice)}
+                                                    </p>
+                                                )}
+                                                <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
+                                                    index === 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                                                }`}>
+                                                    {index === 0 ? '最新' : `第${index + 1}筆`}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                                {todayScans.length > 5 && (
+                                    <div className="text-center">
+                                        <button 
+                                            onClick={() => setCurrentPage('allRecords')}
+                                            className={`px-4 py-2 rounded-lg text-white font-medium ${themePrimary} hover:opacity-80`}
+                                        >
+                                            查看全部 {todayScans.length} 筆記錄
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
+
+                    {(lookupStatus === 'found' || lookupStatus === 'new') && <PriceHistoryDisplay historyRecords={productHistory} theme={currentTheme} />}
+                    
+                    
                 </div>
             )}
             
@@ -1375,23 +1162,10 @@ function App() {
                 <AllRecordsPage theme={currentTheme} onBack={() => setCurrentPage('main')} db={db} userId={userId} isAuthReady={isAuthReady} />
             )}
             
-            {currentPage === 'ocrQueue' && (
-                <OcrQueuePage 
-                    theme={currentTheme} 
-                    onBack={() => setCurrentPage('main')} 
-                    pendingOcrCards={pendingOcrCards}
-                    onRemoveCard={handleRemovePendingOcrCard}
-                    onStoreSelect={setPendingOcrCards}
-                    isStoreSelectorOpen={isOcrQueueStoreSelectorOpen}
-                    onStoreSelectCallback={handleOcrQueueStoreSelect}
-                    onCloseStoreSelector={handleOcrQueueStoreSelectorClose}
-                />
-            )}
-
             {isThemeModalOpen && <ThemeSelector theme={currentTheme} saveTheme={saveUserTheme} onClose={() => setIsThemeModalOpen(false)} />}
-            {isCaptureModalOpen && <AIOcrCaptureModal theme={currentTheme} onAnalysisSuccess={handleAiCaptureSuccess} onClose={handleCaptureModalClose} stream={streamRef.current} onQueueNextCapture={handleQueueNextCapture} />}
+            {isCaptureModalOpen && <AIOcrCaptureModal theme={currentTheme} onAnalysisSuccess={handleAiCaptureSuccess} onClose={handleCaptureModalClose} stream={streamRef.current} />}
             {isStoreSelectorOpen && <StoreSelector theme={currentTheme} onSelect={handleStoreSelect} onClose={() => setIsStoreSelectorOpen(false)} />}
-            {isOcrQueueStoreSelectorOpen && <StoreSelector theme={currentTheme} onSelect={handleOcrQueueStoreSelectConfirm} onClose={handleOcrQueueStoreSelectorClose} />}
+            {showStoreSessionPrompt && <StoreSelector theme={currentTheme} onSelect={handleStoreSessionSelect} onClose={() => setShowStoreSessionPrompt(false)} title="請選擇您目前所在的商店" />}
         </div>
     );
 }

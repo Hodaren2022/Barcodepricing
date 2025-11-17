@@ -4,6 +4,7 @@ import AllRecordsPage from './AllRecordsPage';
 import StoreSelector from './StoreSelector';
 import AIOcrCaptureModal from './components/AIOcrCaptureModal';
 import SettingsPage from './components/SettingsPage'; // 新增導入
+import FirebaseLoadingIndicator from './components/FirebaseLoadingIndicator';
 import { db } from './firebase-config.js'; // <-- 引入 Firebase
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, orderBy, serverTimestamp } from "firebase/firestore";
@@ -202,17 +203,21 @@ function ThemeSelector({ theme, saveTheme, onClose }) {
 
 function useFirebaseAuthentication() {
     const [userId, setUserId] = useState(null);
-    const [isAuthReady, setIsAuthReady] = useState(false);
+    const [firebaseLoadingState, setFirebaseLoadingState] = useState('initializing'); // 'initializing', 'authenticating', 'ready', 'error'
 
     useEffect(() => {
         const auth = getAuth();
+        setFirebaseLoadingState('authenticating');
+        
+        // 背景執行 Firebase 登入，不阻塞 UI
         signInAnonymously(auth)
             .then((userCredential) => {
                 setUserId(userCredential.user.uid);
-                setIsAuthReady(true);
+                setFirebaseLoadingState('ready');
             })
             .catch((error) => {
                 console.error("Firebase 匿名登入失敗:", error);
+                setFirebaseLoadingState('error');
             });
     }, []);
 
@@ -226,7 +231,7 @@ function useFirebaseAuthentication() {
         setCurrentTheme(THEMES[themeKey] || THEMES[DEFAULT_THEME_KEY]);
     }, []);
 
-    return { userId, isAuthReady, currentTheme, saveUserTheme };
+    return { userId, currentTheme, saveUserTheme, firebaseLoadingState };
 }
 
 // ----------------------------------------------------------------------------
@@ -344,7 +349,7 @@ function FullScreenAlert({ message, isVisible, duration, onClose, showButtons, o
 // ----------------------------------------------------------------------------
 
 function App() {
-    const { userId, isAuthReady, currentTheme, saveUserTheme } = useFirebaseAuthentication();
+    const { userId, currentTheme, saveUserTheme, firebaseLoadingState } = useFirebaseAuthentication();
     const streamRef = useRef(null);
     
     const [saveResultToast, setSaveResultToast] = useState(null);
@@ -483,46 +488,80 @@ function App() {
         }
     }, []);
 
-    // 載入今日掃描記錄
-    const loadTodayScans = useCallback(async () => {
-        if (!isAuthReady || !userId) return;
-        
+    // 載入今日掃描記錄 - 從 localStorage 讀取
+    const loadTodayScans = useCallback(() => {
         try {
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const tomorrow = new Date(today);
-            tomorrow.setDate(tomorrow.getDate() + 1);
+            const today = new Date().toDateString(); // 取得今日日期字串
+            const storedData = localStorage.getItem('todayScans');
             
-            const recordsQuery = query(
-                collection(db, "priceRecords"),
-                where("recordedBy", "==", userId),
-                where("timestamp", ">=", today),
-                where("timestamp", "<", tomorrow),
-                orderBy("timestamp", "desc")
-            );
-            
-            const querySnapshot = await getDocs(recordsQuery);
-            const records = querySnapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data(),
-                timestamp: doc.data().timestamp?.toDate()
-            }));
-            
-            setTodayScans(records);
+            if (storedData) {
+                const { date, records } = JSON.parse(storedData);
+                
+                // 檢查日期是否為今日，如果不是則清除舊資料
+                if (date === today) {
+                    // 恢復 timestamp 為 Date 物件
+                    const parsedRecords = records.map(record => ({
+                        ...record,
+                        timestamp: new Date(record.timestamp)
+                    }));
+                    setTodayScans(parsedRecords);
+                } else {
+                    // 日期不同，清除舊資料
+                    localStorage.removeItem('todayScans');
+                    setTodayScans([]);
+                }
+            } else {
+                setTodayScans([]);
+            }
         } catch (error) {
             console.error("載入今日掃描記錄失敗:", error);
+            setTodayScans([]);
         }
-    }, [isAuthReady, userId]);
+    }, []);
 
-    // 應用啟動時檢查商店會話和GPS定位
-    useEffect(() => {
-        if (isAuthReady) {
-            checkStoreSession();
-            loadTodayScans();
-            // 靜默嘗試GPS定位
-            attemptGPSLocation();
+    // 儲存今日掃描記錄到 localStorage
+    const saveTodayScans = useCallback((newRecord) => {
+        try {
+            const today = new Date().toDateString();
+            const storedData = localStorage.getItem('todayScans');
+            let records = [];
+            
+            if (storedData) {
+                const { date, records: existingRecords } = JSON.parse(storedData);
+                // 如果是今日的資料，則保留現有記錄
+                if (date === today) {
+                    records = existingRecords;
+                }
+            }
+            
+            // 新增記錄到陣列開頭（最新的在前）
+            records.unshift(newRecord);
+            
+            // 儲存到 localStorage
+            localStorage.setItem('todayScans', JSON.stringify({
+                date: today,
+                records: records
+            }));
+            
+            // 更新狀態
+            const parsedRecords = records.map(record => ({
+                ...record,
+                timestamp: new Date(record.timestamp)
+            }));
+            setTodayScans(parsedRecords);
+        } catch (error) {
+            console.error("儲存今日掃描記錄失敗:", error);
         }
-    }, [isAuthReady, checkStoreSession, loadTodayScans, attemptGPSLocation]);
+    }, []);
+
+    // 應用啟動時立即執行
+    useEffect(() => {
+        checkStoreSession();
+        // 靜默嘗試GPS定位
+        attemptGPSLocation();
+        // 立即載入今日掃描（從 localStorage）
+        loadTodayScans();
+    }, [checkStoreSession, attemptGPSLocation, loadTodayScans]);
 
     const [currentPage, setCurrentPage] = useState('main'); // 'main', 'allRecords'
     const [ocrResult, setOcrResult] = useState(null);
@@ -596,7 +635,7 @@ function App() {
 
     const lookupProduct = useCallback(async (barcodeData, currentProductName, currentStoreName) => {
         // 如果 Firebase 尚未初始化，則不執行查詢
-        if (!isAuthReady || !userId) {
+        if (!userId) {
             return;
         }
         
@@ -656,7 +695,7 @@ function App() {
             setLookupStatus('ready');
             setProductHistory([]);
         }
-    }, [isAuthReady, userId, setProductName, setLookupStatus, setProductHistory, setStatusMessage]);
+    }, [userId, setProductName, setLookupStatus, setProductHistory, setStatusMessage]);
 
     
 
@@ -805,8 +844,29 @@ function App() {
             // 儲存成功時顯示提示訊息
             setSaveResultToast({ status: toastStatus, message: toastMessage, productName: productName });
             
-            // 重新載入今日掃描記錄
-            loadTodayScans();
+            // 將記錄添加到今日掃描 localStorage
+            const todayRecord = {
+                id: priceRecordDocRef.id,
+                numericalID,
+                productName,
+                storeName: finalStoreName,
+                price: priceValue,
+                quantity: parseFloat(quantity),
+                unitType: unitType,
+                unitPrice: calculatedUnitPrice,
+                discountDetails: discountDetails || '',
+                timestamp: new Date().toISOString(), // 使用 ISO 字串格式
+                recordedBy: userId,
+                originalPrice: ocrResult?.originalPrice ? parseFloat(ocrResult.originalPrice) : null,
+                specialPrice: ocrResult?.specialPrice ? parseFloat(ocrResult.specialPrice) : null,
+                locationData: locationData || null,
+                isBest,
+                bestPrice,
+                bestStore
+            };
+            
+            // 保存到今日掃描 localStorage
+            saveTodayScans(todayRecord);
             
             lookupProduct(barcode, productName, finalStoreName);
 
@@ -821,17 +881,14 @@ function App() {
 
     // 正確地提前定義 saveAndComparePrice 函數
     const saveAndComparePrice = useCallback(async (selectedStore) => {
-        // 確保 Firebase 已初始化，如果尚未完成初始化則強制初始化
-        if (!isAuthReady) {
-            // 顯示加載訊息並等待初始化完成
+        // 確保 Firebase 用戶 ID 已準備好
+        if (!userId) {
+            // 顯示加載訊息並等待用戶 ID
             setIsLoading(true);
-            // 等待 Firebase 初始化完成
             const checkAuth = () => {
-                if (isAuthReady) {
-                    // 初始化完成後繼續執行
+                if (userId) {
                     performSaveAndCompare(selectedStore);
                 } else {
-                    // 繼續等待
                     setTimeout(checkAuth, 100);
                 }
             };
@@ -841,7 +898,7 @@ function App() {
         
         // 如果 Firebase 已準備好，直接執行保存操作
         performSaveAndCompare(selectedStore);
-    }, [isAuthReady, performSaveAndCompare]);
+    }, [userId, performSaveAndCompare]);
     
     const handleAiCaptureSuccess = useCallback(async (result) => {
         const { scannedBarcode, productName, extractedPrice, storeName, discountDetails, quantity, unitType, specialPrice, capturedImage: receivedImage } = result;
@@ -938,16 +995,14 @@ function App() {
         }
     }, [lookupStatus]);
 
-    if (!isAuthReady) {
-        return <div className="flex items-center justify-center min-h-screen bg-gray-50"><p className="text-xl text-gray-700">正在連線至雲端服務...</p></div>;
-    }
-
     if (currentPage === 'allRecords') {
-        return <AllRecordsPage theme={currentTheme} onBack={() => setCurrentPage('main')} db={db} userId={userId} isAuthReady={isAuthReady} />;
+        return <AllRecordsPage theme={currentTheme} onBack={() => setCurrentPage('main')} db={db} userId={userId} isAuthReady={true} />;
     }
 
     return (
         <div className={`min-h-screen p-4 sm:p-8 ${themeLight}`}>
+            {/* Firebase 載入進度條 */}
+            <FirebaseLoadingIndicator loadingState={firebaseLoadingState} />
             <SaveResultToast result={saveResultToast} onClose={() => setSaveResultToast(null)} />
             <FullScreenAlert 
                 message={fullScreenAlert.message}
@@ -977,7 +1032,7 @@ function App() {
                             <button onClick={() => setCurrentPage('allRecords')} className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`} title="查看所有記錄"><Database className="w-5 h-5" /></button>
                             <button onClick={() => setIsThemeModalOpen(true)} className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`} title="設定介面主題"><PaintBucket className="w-5 h-5" /></button>
                             <button onClick={() => setIsSettingsOpen(true)} className={`p-2 rounded-full text-white shadow-md transition-all ${themePrimary} hover:opacity-80`} title="設定"><SettingsIcon className="w-5 h-5" /></button>
-                            <p className="text-sm text-gray-500 hidden sm:block">User: {userId.slice(0, 8)}...</p>
+                            <p className="text-sm text-gray-500 hidden sm:block">User: {userId ? userId.slice(0, 8) : 'Loading'}...</p>
                         </div>
                     </header>
 
@@ -1103,14 +1158,14 @@ function App() {
                     </div>
 
                     {/* 今日掃描摘要 */}
-                    {todayScans.length > 0 && (
+                    {(todayScans || []).length > 0 && (
                         <div className="mt-8">
                             <h2 className={`text-xl font-semibold ${themeText} mb-4 flex items-center`}>
                                 <Zap className="w-5 h-5 mr-2" />
-                                今日掃描 ({todayScans.length} 筆)
+                                今日掃描 ({(todayScans || []).length} 筆)
                             </h2>
                             <div className="space-y-3">
-                                {todayScans.slice(0, 5).map((scan, index) => (
+                                {(todayScans || []).slice(0, 5).map((scan, index) => (
                                     <div key={scan.id} className="bg-white rounded-lg p-4 shadow-md border-l-4 border-blue-500">
                                         <div className="flex justify-between items-start">
                                             <div className="flex-1">
@@ -1138,13 +1193,13 @@ function App() {
                                         </div>
                                     </div>
                                 ))}
-                                {todayScans.length > 5 && (
+                                {(todayScans || []).length > 5 && (
                                     <div className="text-center">
                                         <button 
                                             onClick={() => setCurrentPage('allRecords')}
                                             className={`px-4 py-2 rounded-lg text-white font-medium ${themePrimary} hover:opacity-80`}
                                         >
-                                            查看全部 {todayScans.length} 筆記錄
+                                            查看全部 {(todayScans || []).length} 筆記錄
                                         </button>
                                     </div>
                                 )}
@@ -1159,7 +1214,7 @@ function App() {
             )}
             
             {currentPage === 'allRecords' && (
-                <AllRecordsPage theme={currentTheme} onBack={() => setCurrentPage('main')} db={db} userId={userId} isAuthReady={isAuthReady} />
+                <AllRecordsPage theme={currentTheme} onBack={() => setCurrentPage('main')} db={db} userId={userId} isAuthReady={true} />
             )}
             
             {isThemeModalOpen && <ThemeSelector theme={currentTheme} saveTheme={saveUserTheme} onClose={() => setIsThemeModalOpen(false)} />}

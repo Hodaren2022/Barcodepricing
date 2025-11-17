@@ -1,13 +1,14 @@
 <!--
 Sync Impact Report:
-- Version change: 1.0.0 → 1.1.0
-- Modified principles: V. Performance & Offline Capability (enhanced with specific metrics)
-- Added sections: VI. Radical Simplicity & Performance Standards
+- Version change: 1.1.0 → 1.1.1
+- Modified principles: None
+- Added sections: None
+- Removed sections: None
 - Templates requiring updates: ✅ All templates reviewed and aligned
 - Follow-up TODOs: None
 -->
 
-# Barcode Pricing Corator Constitution
+# Barcode Pricing Comparator Constitution
 
 ## Core Principles
 
@@ -59,4 +60,4 @@ This constitution supersedes all other development practices. Amendments require
 
 All pull requests MUST verify compliance with these principles. Complexity that violates these principles MUST be justified with clear business requirements and approved by the project maintainer.
 
-**Version**: 1.1.0 | **Ratified**: 2025-01-27 | **Last Amended**: 2025-01-27
+**Version**: 1.1.1 | **Ratified**: 2025-01-27 | **Last Amended**: 2025-01-27

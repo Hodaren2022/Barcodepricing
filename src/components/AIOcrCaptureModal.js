@@ -231,6 +231,9 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
             return; 
         }
         
+        // 保存當前圖像用於分析
+        const imageToAnalyze = capturedImage;
+        
         // 立即清除捕獲的圖像並重新啟動相機，讓用戶可以繼續拍攝
         setCapturedImage(null);
         setScanError('');
@@ -245,7 +248,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
         }
         
         // 準備 API 請求參數
-        const base64Image = capturedImage.split(',')[1];
+        const base64Image = imageToAnalyze.split(',')[1];
         
         const userQuery = "請根據圖片中的條碼、標價、產品名稱、規格（質量/容量/數量）、商店名稱和折扣資訊，以嚴格的 JSON 格式輸出結構化數據。請特別注意計算產品的總容量/總質量。如果圖像中顯示了原價和特價，請分別標註。";
 
@@ -325,7 +328,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
                     unitPrice: unitPrice,
                     specialPrice: specialPrice,
                     originalPrice: originalPrice,
-                    capturedImage: capturedImage  // 添加捕獲的圖像
+                    capturedImage: imageToAnalyze  // 使用保存的圖像
                 };
                 
                 // 直接調用成功回調
@@ -339,7 +342,7 @@ function AIOcrCaptureModal({ theme, onAnalysisSuccess, onClose, stream }) {
                 
                 // 即使分析失敗，也將基本數據加入序列，讓用戶知道有錯誤
                 const errorData = {
-                    capturedImage: capturedImage,
+                    capturedImage: imageToAnalyze,
                     error: error.message
                 };
                 onAnalysisSuccess(errorData);

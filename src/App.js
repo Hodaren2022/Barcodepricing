@@ -877,7 +877,7 @@ function App() {
         } finally {
             setIsLoading(false);
         }
-    }, [userId, barcode, productName, currentPrice, discountDetails, storeName, lookupProduct, quantity, unitType, setSaveResultToast, setComparisonResult, setIsLoading, setIsStoreSelectorOpen, ocrResult, loadTodayScans, locationData, productHistory]);
+    }, [userId, barcode, productName, currentPrice, discountDetails, storeName, lookupProduct, quantity, unitType, setSaveResultToast, setComparisonResult, setIsLoading, setIsStoreSelectorOpen, ocrResult, locationData, productHistory, saveTodayScans]);
 
     // 正確地提前定義 saveAndComparePrice 函數
     const saveAndComparePrice = useCallback(async (selectedStore) => {
